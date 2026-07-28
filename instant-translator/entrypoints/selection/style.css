@@ -127,6 +127,55 @@
   background: #e2e8f0;
 }
 
+.translation-card__loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  min-height: 24px;
+
+  font-size: 13px;
+  line-height: 20px;
+  color: #64748b;
+}
+
+.translation-card__spinner {
+  display: inline-block;
+  box-sizing: border-box;
+
+  width: 16px;
+  height: 16px;
+
+  border: 2px solid #cbd5e1;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+
+  animation:
+    translation-card-spin 700ms linear infinite;
+}
+
+.translation-card__error {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  box-sizing: border-box;
+  padding: 10px;
+
+  font-size: 13px;
+  line-height: 20px;
+  color: #991b1b;
+
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+}
+
+.translation-card__error strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .translation-card__footer {
   box-sizing: border-box;
   padding: 9px 14px;
@@ -151,4 +200,25 @@
 .translation-card-leave-to {
   opacity: 0;
   transform: translateY(4px) scale(0.98);
+}
+
+@keyframes translation-card-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .translation-card-enter-active,
+  .translation-card-leave-active {
+    transition: none;
+  }
+
+  .translation-card__spinner {
+    animation-duration: 1.4s;
+  }
 }

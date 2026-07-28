@@ -13,7 +13,7 @@ const emit = defineEmits<{
 <template>
   <Transition name="translation-card">
     <section
-      v-if="state.visible"
+      v-if="state.status !== 'hidden'"
       class="translation-card"
       :style="{
         left: `${state.left}px`,
@@ -21,11 +21,12 @@ const emit = defineEmits<{
       }"
       role="dialog"
       aria-label="即時翻譯"
+      aria-live="polite"
       @pointerdown.stop
     >
       <header class="translation-card__header">
         <span class="translation-card__title">
-          測試翻譯
+          即時翻譯
         </span>
 
         <button
@@ -56,14 +57,54 @@ const emit = defineEmits<{
             翻譯
           </p>
 
-          <p class="translation-card__text translation-card__translated-text">
+          <div
+            v-if="state.status === 'loading'"
+            class="translation-card__loading"
+          >
+            <span
+              class="translation-card__spinner"
+              aria-hidden="true"
+            />
+
+            <span>正在翻譯……</span>
+          </div>
+
+          <p
+            v-else-if="state.status === 'success'"
+            class="
+              translation-card__text
+              translation-card__translated-text
+            "
+          >
             {{ state.translatedText }}
           </p>
+
+          <div
+            v-else-if="state.status === 'error'"
+            class="translation-card__error"
+            role="alert"
+          >
+            <strong>翻譯失敗</strong>
+
+            <span>
+              {{ state.errorMessage }}
+            </span>
+          </div>
         </section>
       </div>
 
       <footer class="translation-card__footer">
-        真正翻譯功能將在後續階段加入
+        <span v-if="state.status === 'loading'">
+          正在使用模擬翻譯服務
+        </span>
+
+        <span v-else-if="state.status === 'success'">
+          模擬翻譯結果
+        </span>
+
+        <span v-else-if="state.status === 'error'">
+          請重新選取文字再試一次
+        </span>
       </footer>
     </section>
   </Transition>

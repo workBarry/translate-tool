@@ -5,58 +5,173 @@ import {
 import { createApp, reactive } from 'vue';
 
 import TranslationCard from './selection/TranslationCard.vue';
+import {
+  isAbortError,
+  translateText,
+} from './selection/fake-translation.service';
+import { PopoverController } from './selection/popover-controller';
+import { calculatePopoverPosition } from './selection/position-calculator';
+import { getTextSelection } from './selection/selection-detector';
 import './selection/style.css';
 
 import type { TranslationPopoverState } from './selection/types';
 
-const CARD_WIDTH = 320;
-const CARD_ESTIMATED_HEIGHT = 280;
-const CARD_GAP = 12;
-const VIEWPORT_PADDING = 8;
-
-interface PopoverPosition {
-  left: number;
-  top: number;
-}
-
 export default defineContentScript({
   matches: ['http://*/*', 'https://*/*'],
 
-  // 告訴 WXT：匯入的 CSS 要放進 Shadow Root。
   cssInjectionMode: 'ui',
 
   async main(ctx) {
-    console.log('[Instant Translator] Content Script 已載入');
+    console.log(
+      '[Instant Translator] Content Script 已載入',
+    );
 
-    const state = reactive<TranslationPopoverState>({
-      visible: false,
-      sourceText: '',
-      translatedText: '',
-      left: 0,
-      top: 0,
-    });
+    const state =
+      reactive<TranslationPopoverState>({
+        status: 'hidden',
+        sourceText: '',
+        translatedText: '',
+        errorMessage: '',
+        left: 0,
+        top: 0,
+      });
+
+    const popoverController =
+      new PopoverController(state);
+
+    let latestRequestId = 0;
+
+    let activeAbortController:
+      | AbortController
+      | null = null;
+
+    const abortActiveTranslation = (): void => {
+      activeAbortController?.abort();
+      activeAbortController = null;
+    };
 
     const hidePopover = (): void => {
-      state.visible = false;
+      // 讓目前進行中的請求失效。
+      latestRequestId += 1;
+
+      abortActiveTranslation();
+      popoverController.hide();
+    };
+
+    const startTranslation = async (
+      text: string,
+      pointerX: number,
+      pointerY: number,
+    ): Promise<void> => {
+      // 若上一個請求尚未完成，先取消。
+      abortActiveTranslation();
+
+      const requestId = ++latestRequestId;
+
+      const abortController =
+        new AbortController();
+
+      activeAbortController =
+        abortController;
+
+      const position =
+        calculatePopoverPosition(
+          pointerX,
+          pointerY,
+        );
+
+      popoverController.showLoading(
+        text,
+        position,
+      );
+
+      console.log(
+        '[Instant Translator] 開始模擬翻譯',
+        {
+          requestId,
+          text,
+        },
+      );
+
+      try {
+        const result = await translateText(
+          text,
+          abortController.signal,
+        );
+
+        // 使用者可能已經選取其他文字。
+        // 舊請求不得更新目前卡片。
+        if (requestId !== latestRequestId) {
+          return;
+        }
+
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        popoverController.showSuccess(
+          result.translatedText,
+        );
+
+        console.log(
+          '[Instant Translator] 模擬翻譯完成',
+          {
+            requestId,
+            result,
+          },
+        );
+      } catch (error: unknown) {
+        // 被新請求或關閉操作取消，
+        // 不屬於真正錯誤。
+        if (isAbortError(error)) {
+          console.log(
+            '[Instant Translator] 翻譯請求已取消',
+            {
+              requestId,
+            },
+          );
+
+          return;
+        }
+
+        if (requestId !== latestRequestId) {
+          return;
+        }
+
+        console.error(
+          '[Instant Translator] 模擬翻譯失敗',
+          error,
+        );
+
+        popoverController.showError(
+          error instanceof Error
+            ? error.message
+            : '發生未知錯誤',
+        );
+      } finally {
+        if (
+          activeAbortController ===
+          abortController
+        ) {
+          activeAbortController = null;
+        }
+      }
     };
 
     const ui = await createShadowRootUi(ctx, {
       name: 'instant-translator',
-
-      // 使用不占據網頁排版空間的浮動 UI。
       position: 'overlay',
-
-      // 盡量顯示在網站內容上方。
       zIndex: 2_147_483_647,
-
-      // 降低卡片內事件與外部網站互相影響。
       isolateEvents: true,
 
       onMount(container) {
-        const app = createApp(TranslationCard, {
-          state,
-          onClose: hidePopover,
-        });
+        const app = createApp(
+          TranslationCard,
+          {
+            state,
+            onClose: hidePopover,
+          },
+        );
 
         app.mount(container);
 
@@ -64,6 +179,7 @@ export default defineContentScript({
       },
 
       onRemove(app) {
+        abortActiveTranslation();
         app?.unmount();
       },
     });
@@ -74,62 +190,38 @@ export default defineContentScript({
       document,
       'pointerup',
       (event) => {
-        // 目前只處理滑鼠左鍵。
-        if (event.button !== 0) {
+        const selectedContent =
+          getTextSelection(event);
+
+        if (!selectedContent) {
           return;
         }
 
-        const selection = window.getSelection();
-
-        if (!selection) {
-          return;
-        }
-
-        if (selection.rangeCount === 0) {
-          return;
-        }
-
-        if (selection.isCollapsed) {
-          return;
-        }
-
-        const selectedText = selection.toString().trim();
-
-        if (!selectedText) {
-          return;
-        }
-
-        const position = calculatePopoverPosition(
-          event.clientX,
-          event.clientY,
+        void startTranslation(
+          selectedContent.text,
+          selectedContent.pointerX,
+          selectedContent.pointerY,
         );
-
-        state.sourceText = selectedText;
-        state.translatedText = '這是測試翻譯結果，下一階段才會串接翻譯流程。';
-        state.left = position.left;
-        state.top = position.top;
-        state.visible = true;
-
-        console.log('[Instant Translator] 顯示翻譯卡片', {
-          selectedText,
-          position,
-        });
       },
       {
         capture: true,
       },
     );
 
-    // 點擊卡片以外的網頁區域時關閉。
-    ctx.addEventListener(document, 'pointerdown', () => {
-      if (!state.visible) {
-        return;
-      }
+    // 點擊翻譯卡片以外的地方時關閉。
+    ctx.addEventListener(
+      document,
+      'pointerdown',
+      () => {
+        if (state.status === 'hidden') {
+          return;
+        }
 
-      hidePopover();
-    });
+        hidePopover();
+      },
+    );
 
-    // 按 Escape 關閉。
+    // 按 Escape 關閉卡片。
     ctx.addEventListener(
       document,
       'keydown',
@@ -143,7 +235,7 @@ export default defineContentScript({
       },
     );
 
-    // 捲動頁面時先關閉，避免卡片留在舊座標。
+    // 捲動時關閉卡片。
     ctx.addEventListener(
       window,
       'scroll',
@@ -156,39 +248,12 @@ export default defineContentScript({
     );
 
     // 視窗尺寸改變時關閉。
-    ctx.addEventListener(window, 'resize', () => {
-      hidePopover();
-    });
+    ctx.addEventListener(
+      window,
+      'resize',
+      () => {
+        hidePopover();
+      },
+    );
   },
 });
-
-function calculatePopoverPosition(
-  pointerX: number,
-  pointerY: number,
-): PopoverPosition {
-  let left = pointerX + CARD_GAP;
-  let top = pointerY;
-
-  const rightBoundary =
-    window.innerWidth - VIEWPORT_PADDING;
-
-  const bottomBoundary =
-    window.innerHeight - VIEWPORT_PADDING;
-
-  // 滑鼠靠近右側時，改成顯示在滑鼠左側。
-  if (left + CARD_WIDTH > rightBoundary) {
-    left = pointerX - CARD_WIDTH - CARD_GAP;
-  }
-
-  // 滑鼠靠近底部時，把卡片往上推。
-  if (top + CARD_ESTIMATED_HEIGHT > bottomBoundary) {
-    top =
-      bottomBoundary -
-      CARD_ESTIMATED_HEIGHT;
-  }
-
-  return {
-    left: Math.max(VIEWPORT_PADDING, left),
-    top: Math.max(VIEWPORT_PADDING, top),
-  };
-}
