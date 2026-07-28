@@ -2,6 +2,12 @@ export type TranslationStatus = "hidden" | "loading" | "success" | "error";
 
 export type TranslationLanguage = "zh-Hant" | "en" | "ja" | "ko";
 
+export type TranslationModelStatus =
+  | 'idle'
+  | 'downloading'
+  | 'preparing'
+  | 'ready';
+
 export type SpeechPlaybackStatus =
   | 'idle'
   | 'starting'
@@ -25,6 +31,9 @@ export interface TranslationPopoverState {
   targetLanguage: TranslationLanguage;
 
   detectedSourceLanguage: string;
+
+  modelStatus: TranslationModelStatus;
+  modelDownloadProgress: number;
 
   speechPlaybackStatus:
     SpeechPlaybackStatus;

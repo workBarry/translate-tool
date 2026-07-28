@@ -38,3 +38,48 @@ export function calculatePopoverPosition(
     top: Math.max(VIEWPORT_PADDING, top),
   };
 }
+
+/**
+ * 依卡片實際尺寸修正位置，使其完整保留在 viewport 內。
+ *
+ * 初始位置仍使用滑鼠座標快速決定；等 Vue 完成渲染後，
+ * 再透過 getBoundingClientRect() 處理實際高度、換行與錯誤訊息。
+ */
+export function correctPopoverPosition(
+  cardRect: DOMRect,
+  currentPosition: PopoverPosition,
+): PopoverPosition {
+  const rightBoundary =
+    window.innerWidth - VIEWPORT_PADDING;
+
+  const bottomBoundary =
+    window.innerHeight - VIEWPORT_PADDING;
+
+  let left = currentPosition.left;
+  let top = currentPosition.top;
+
+  if (cardRect.right > rightBoundary) {
+    left -= cardRect.right - rightBoundary;
+  }
+
+  if (cardRect.left < VIEWPORT_PADDING) {
+    left += VIEWPORT_PADDING - cardRect.left;
+  }
+
+  if (cardRect.bottom > bottomBoundary) {
+    top -= cardRect.bottom - bottomBoundary;
+  }
+
+  if (cardRect.top < VIEWPORT_PADDING) {
+    top += VIEWPORT_PADDING - cardRect.top;
+  }
+
+  return {
+    left: Math.round(
+      Math.max(VIEWPORT_PADDING, left),
+    ),
+    top: Math.round(
+      Math.max(VIEWPORT_PADDING, top),
+    ),
+  };
+}

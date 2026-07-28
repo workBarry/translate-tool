@@ -12,10 +12,13 @@
   min-width: 0;
   max-width: none;
   max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 16px);
 
   margin: 0;
   padding: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 
   /*
    * Shadow Host 和外層容器本來就是透明的，

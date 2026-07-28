@@ -1,9 +1,18 @@
 <script setup lang="ts">
 import {
   computed,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  watch,
 } from 'vue';
 
+import {
+  correctPopoverPosition,
+} from './position-calculator';
+
 import type {
+  PopoverPosition,
   SpeechTarget,
   TranslationLanguage,
   TranslationPopoverState,
@@ -22,6 +31,10 @@ const emit = defineEmits<{
     event: 'change-target-language',
     targetLanguage: TranslationLanguage,
   ): void;
+  (
+    event: 'adjust-position',
+    position: PopoverPosition,
+  ): void;
 }>();
 
 const languageOptions: ReadonlyArray<{
@@ -33,6 +46,15 @@ const languageOptions: ReadonlyArray<{
   { value: 'ja', label: '日本語' },
   { value: 'ko', label: '한국어' },
 ];
+
+const cardElement =
+  ref<HTMLElement | null>(null);
+
+let resizeObserver: ResizeObserver | null =
+  null;
+
+let correctionFrame: number | null =
+  null;
 
 const sourceLanguageLabel = computed(() => {
   switch (props.state.detectedSourceLanguage) {
@@ -62,6 +84,19 @@ const isStoppingSpeech = computed(() => {
   return props.state.speechPlaybackStatus === 'stopping';
 });
 
+const modelLoadingMessage = computed(() => {
+  switch (props.state.modelStatus) {
+    case 'downloading':
+      return `正在下載翻譯模型（${props.state.modelDownloadProgress}%）`;
+    case 'preparing':
+      return '模型下載完成，正在準備翻譯……';
+    case 'ready':
+      return '模型準備完成，正在翻譯……';
+    default:
+      return '正在準備翻譯……';
+  }
+});
+
 function isTargetSpeaking(
   target: SpeechTarget,
 ): boolean {
@@ -85,12 +120,111 @@ function handleTargetLanguageChange(
     target.value as TranslationLanguage,
   );
 }
+
+function schedulePositionCorrection(): void {
+  if (props.state.status === 'hidden') {
+    return;
+  }
+
+  if (correctionFrame !== null) {
+    cancelAnimationFrame(correctionFrame);
+  }
+
+  correctionFrame = requestAnimationFrame(
+    async () => {
+      correctionFrame = null;
+
+      await nextTick();
+
+      correctCurrentPosition();
+    },
+  );
+}
+
+function correctCurrentPosition(): void {
+  const card = cardElement.value;
+
+  if (!card || props.state.status === 'hidden') {
+    return;
+  }
+
+  const correctedPosition = correctPopoverPosition(
+    card.getBoundingClientRect(),
+    {
+      left: props.state.left,
+      top: props.state.top,
+    },
+  );
+
+  if (
+    correctedPosition.left === props.state.left &&
+    correctedPosition.top === props.state.top
+  ) {
+    return;
+  }
+
+  emit('adjust-position', correctedPosition);
+}
+
+watch(
+  cardElement,
+  (card) => {
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+
+    if (!card) {
+      return;
+    }
+
+    resizeObserver = new ResizeObserver(() => {
+      schedulePositionCorrection();
+    });
+
+    resizeObserver.observe(card);
+    schedulePositionCorrection();
+  },
+  {
+    flush: 'post',
+  },
+);
+
+watch(
+  () => [
+    props.state.status,
+    props.state.sourceText,
+    props.state.translatedText,
+    props.state.errorMessage,
+    props.state.speechErrorMessage,
+    props.state.modelStatus,
+    props.state.modelDownloadProgress,
+    props.state.left,
+    props.state.top,
+    props.state.targetLanguage,
+  ],
+  () => {
+    schedulePositionCorrection();
+  },
+  {
+    flush: 'post',
+  },
+);
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+
+  if (correctionFrame !== null) {
+    cancelAnimationFrame(correctionFrame);
+    correctionFrame = null;
+  }
+});
 </script>
 
 <template>
   <Transition name="translation-card">
     <section
       v-if="state.status !== 'hidden'"
+      ref="cardElement"
       class="translation-card"
       :style="{
         left: `${state.left}px`,
@@ -104,10 +238,7 @@ function handleTargetLanguageChange(
       @click.stop
     >
       <header class="translation-card__header">
-        <span class="translation-card__title">
-          即時翻譯
-        </span>
-
+        <span class="translation-card__title">即時翻譯</span>
         <button
           type="button"
           class="translation-card__close-button"
@@ -120,27 +251,16 @@ function handleTargetLanguageChange(
 
       <div class="translation-card__language-row">
         <div class="translation-card__language-info">
-          <span class="translation-card__language-label">
-            原文語言
-          </span>
-
+          <span class="translation-card__language-label">原文語言</span>
           <span class="translation-card__language-value">
             {{ sourceLanguageLabel }}
           </span>
         </div>
-
-        <span
-          class="translation-card__language-arrow"
-          aria-hidden="true"
-        >
+        <span class="translation-card__language-arrow" aria-hidden="true">
           →
         </span>
-
         <label class="translation-card__language-select-wrapper">
-          <span class="translation-card__language-label">
-            翻譯成
-          </span>
-
+          <span class="translation-card__language-label">翻譯成</span>
           <select
             class="translation-card__language-select"
             :value="state.targetLanguage"
@@ -162,7 +282,6 @@ function handleTargetLanguageChange(
         <section class="translation-card__section">
           <div class="translation-card__section-heading">
             <p class="translation-card__label">原文</p>
-
             <button
               type="button"
               class="translation-card__speech-button"
@@ -177,10 +296,7 @@ function handleTargetLanguageChange(
               {{ isTargetSpeaking('source') ? '■ 停止原文' : '▶ 原文發音' }}
             </button>
           </div>
-
-          <p class="translation-card__text">
-            {{ state.sourceText }}
-          </p>
+          <p class="translation-card__text">{{ state.sourceText }}</p>
         </section>
 
         <div class="translation-card__divider" />
@@ -188,7 +304,6 @@ function handleTargetLanguageChange(
         <section class="translation-card__section">
           <div class="translation-card__section-heading">
             <p class="translation-card__label">翻譯</p>
-
             <button
               type="button"
               class="translation-card__speech-button"
@@ -196,10 +311,7 @@ function handleTargetLanguageChange(
                 'translation-card__speech-button--active':
                   isTargetSpeaking('translation'),
               }"
-              :disabled="
-                isStoppingSpeech ||
-                state.status !== 'success'
-              "
+              :disabled="isStoppingSpeech || state.status !== 'success'"
               aria-label="朗讀譯文"
               @click="emit('speak-translation')"
             >
@@ -215,21 +327,15 @@ function handleTargetLanguageChange(
             v-if="state.status === 'loading'"
             class="translation-card__loading"
           >
-            <span
-              class="translation-card__spinner"
-              aria-hidden="true"
-            />
-
-            <span>正在翻譯……</span>
+            <span class="translation-card__spinner" aria-hidden="true" />
+            <span>{{ modelLoadingMessage }}</span>
           </div>
-
           <p
             v-else-if="state.status === 'success'"
             class="translation-card__text translation-card__translated-text"
           >
             {{ state.translatedText }}
           </p>
-
           <div
             v-else-if="state.status === 'error'"
             class="translation-card__error"

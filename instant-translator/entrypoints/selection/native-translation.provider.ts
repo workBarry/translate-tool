@@ -27,6 +27,9 @@ export interface NativeTranslationInput {
   onDownloadProgress?: (
     percentage: number,
   ) => void;
+
+  onPreparing?: () => void;
+  onReady?: () => void;
 }
 
 export interface NativeTranslationResult {
@@ -147,6 +150,23 @@ if (!('Translator' in self)) {
         'zh-Hant',
     );
 
+    console.log(
+      '[Instant Translator] 語言判斷結果',
+      {
+        text:
+          normalizedText.slice(
+            0,
+            100,
+          ),
+
+        pageLanguage:
+          input.pageLanguage ||
+          '(empty)',
+
+        sourceLanguage,
+        targetLanguage,
+      },
+    );
   if (!targetLanguage) {
     return Promise.reject(
       new NativeTranslationError(
@@ -155,6 +175,14 @@ if (!('Translator' in self)) {
       ),
     );
   }
+  if (!sourceLanguage) {
+  return Promise.reject(
+    new NativeTranslationError(
+      '無法判斷這段文字是中文或日文，請手動選擇來源語言',
+      'UNSUPPORTED_LANGUAGE',
+    ),
+  );
+}
 
   /*
    * 已經是繁體中文時，
@@ -187,6 +215,9 @@ try {
 
       onDownloadProgress:
         input.onDownloadProgress,
+
+      onPreparing:
+        input.onPreparing,
     });
 } catch (error: unknown) {
   return Promise.reject(
@@ -204,6 +235,8 @@ try {
     ) => {
       input.signal
         .throwIfAborted();
+
+      input.onReady?.();
 
       /*
        * 單次翻譯仍然使用自己的 signal。
@@ -253,7 +286,7 @@ try {
 function inferSourceLanguage(
   text: string,
   pageLanguage?: string,
-): string {
+): string | null {
   const normalizedPageLanguage =
     normalizeLanguageTag(
       pageLanguage,
@@ -331,20 +364,43 @@ function inferSourceLanguage(
   /*
    * 漢字。
    */
+/*
+ * 漢字可能是中文，也可能是日文。
+ *
+ * 單靠 Unicode 漢字範圍無法區分，
+ * 因此優先參考選取內容所在元素或網頁的 lang。
+ */
+/*
+ * 純漢字可能是中文或日文。
+ */
+if (
+  /[\u3400-\u9fff]/u.test(text)
+) {
   if (
-    /[\u3400-\u9fff]/u.test(
-      text,
-    )
+    normalizedPageLanguage === 'ja'
   ) {
-    if (
-      normalizedPageLanguage ===
-      'zh-Hant'
-    ) {
-      return 'zh-Hant';
-    }
+    return 'ja';
+  }
 
+  if (
+    normalizedPageLanguage ===
+    'zh-Hant'
+  ) {
+    return 'zh-Hant';
+  }
+
+  if (
+    normalizedPageLanguage === 'zh'
+  ) {
     return 'zh';
   }
+
+  /*
+   * 網頁不是中文或日文，
+   * 文字又只有漢字，無法可靠判斷。
+   */
+  return null;
+}
 
   /*
    * 拉丁字母優先參考網頁 lang。

@@ -26,10 +26,45 @@ export class PopoverController {
     this.state.top =
       position.top;
 
+    this.state.modelStatus =
+      'idle';
+
+    this.state.modelDownloadProgress =
+      0;
+
     this.resetSpeechState();
 
     this.state.status =
       'loading';
+  }
+
+  showModelDownloading(
+    percentage: number,
+  ): void {
+    this.state.modelStatus =
+      'downloading';
+
+    this.state.modelDownloadProgress =
+      Math.min(
+        99,
+        Math.max(0, percentage),
+      );
+  }
+
+  showModelPreparing(): void {
+    this.state.modelStatus =
+      'preparing';
+
+    this.state.modelDownloadProgress =
+      100;
+  }
+
+  showModelReady(): void {
+    this.state.modelStatus =
+      'ready';
+
+    this.state.modelDownloadProgress =
+      100;
   }
 
   showSuccess(

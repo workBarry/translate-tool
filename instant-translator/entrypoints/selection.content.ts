@@ -2,7 +2,10 @@ import { browser, type Browser } from "wxt/browser";
 
 import { isSpeechPlaybackEventMessage } from "../src/shared/speech-messages";
 
-import type { SpeechTarget } from "./selection/types";
+import type {
+  PopoverPosition,
+  SpeechTarget,
+} from "./selection/types";
 import { createShadowRootUi, defineContentScript } from "#imports";
 import { createApp, reactive } from "vue";
 import {
@@ -97,6 +100,9 @@ export default defineContentScript({
 
       detectedSourceLanguage: "",
 
+      modelStatus: 'idle',
+      modelDownloadProgress: 0,
+
       speechPlaybackStatus: "idle",
 
       activeSpeechTarget: null,
@@ -104,6 +110,20 @@ export default defineContentScript({
       speechErrorMessage: "",
     });
     const popoverController = new PopoverController(state);
+
+    function adjustPopoverPosition(
+      position: PopoverPosition,
+    ): void {
+      if (
+        ctx.isInvalid ||
+        !isCurrentInstance()
+      ) {
+        return;
+      }
+
+      state.left = position.left;
+      state.top = position.top;
+    }
 
     /*
      * 目前最新的翻譯請求。
@@ -365,6 +385,8 @@ export default defineContentScript({
               onStopSpeech: stopCurrentSpeech,
 
               onChangeTargetLanguage: changeTargetLanguage,
+
+              onAdjustPosition: adjustPopoverPosition,
             });
 
             app.mount(mountPoint);
@@ -532,6 +554,22 @@ browser.runtime.onMessage.addListener(
        */
       popoverController.showLoading(text, position);
 
+      popoverController.showModelDownloading(0);
+
+      const pageLanguage =
+        getSelectionLanguageHint();
+
+      console.log(
+        '[Instant Translator] 準備呼叫 translateWithChrome',
+        {
+          requestId,
+          text,
+          pageLanguage,
+          targetLanguage:
+            state.targetLanguage,
+        },
+      );
+
       /*
        * 重要：
        *
@@ -544,19 +582,76 @@ browser.runtime.onMessage.addListener(
       const translationPromise = translateWithChrome({
         text,
 
-        pageLanguage: document.documentElement.lang,
+        pageLanguage,
 
         targetLanguage: state.targetLanguage,
 
         signal: abortController.signal,
 
         onDownloadProgress(percentage) {
+          if (
+            requestId !== latestRequestId ||
+            abortController.signal.aborted ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          popoverController.showModelDownloading(
+            percentage,
+          );
+
           console.log("[Instant Translator] 模型下載中", {
             requestId,
             percentage,
           });
         },
+
+        onPreparing() {
+          if (
+            requestId !== latestRequestId ||
+            abortController.signal.aborted ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          popoverController.showModelPreparing();
+
+          console.log(
+            '[Instant Translator] 模型下載完成，正在準備 session',
+            {
+              requestId,
+            },
+          );
+        },
+
+        onReady() {
+          if (
+            requestId !== latestRequestId ||
+            abortController.signal.aborted ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          popoverController.showModelReady();
+
+          console.log(
+            '[Instant Translator] Translator session 已可使用',
+            {
+              requestId,
+            },
+          );
+        },
       });
+
+      console.log(
+        '[Instant Translator] translateWithChrome 已回傳 Promise',
+        {
+          requestId,
+        },
+      );
 
       /*
        * 翻譯已開始建立後，
@@ -573,7 +668,23 @@ browser.runtime.onMessage.addListener(
 
           const result = await translationPromise;
 
+          console.log(
+            '[Instant Translator] translateWithChrome Promise 已完成',
+            {
+              requestId,
+              result,
+            },
+          );
+
           if (requestId !== latestRequestId) {
+            console.log(
+              '[Instant Translator] 忽略舊翻譯結果',
+              {
+                requestId,
+                latestRequestId,
+              },
+            );
+
             return;
           }
 
@@ -602,6 +713,16 @@ browser.runtime.onMessage.addListener(
             translatedText: result.translatedText,
           });
         } catch (error: unknown) {
+          console.error(
+            '[Instant Translator] translateWithChrome Promise 失敗',
+            {
+              requestId,
+              error,
+              aborted:
+                abortController.signal.aborted,
+            },
+          );
+
           if (isAbortError(error)) {
             console.log("[Instant Translator] 翻譯已取消", {
               requestId,
@@ -998,4 +1119,53 @@ function isTranslatorUiEvent(event: Event): boolean {
       node.classList.contains("translation-card")
     );
   });
+}
+
+function getSelectionLanguageHint():
+  string {
+  const selection =
+    window.getSelection();
+
+  if (
+    !selection ||
+    selection.rangeCount === 0
+  ) {
+    return (
+      document.documentElement
+        .lang ||
+      ''
+    );
+  }
+
+  const range =
+    selection.getRangeAt(0);
+
+  const commonAncestor =
+    range.commonAncestorContainer;
+
+  const element =
+    commonAncestor instanceof
+      Element
+      ? commonAncestor
+      : commonAncestor.parentElement;
+
+  const languageElement =
+    element?.closest<HTMLElement>(
+      '[lang]',
+    );
+
+  const nearestLanguage =
+    languageElement
+      ?.getAttribute('lang')
+      ?.trim();
+
+  if (nearestLanguage) {
+    return nearestLanguage;
+  }
+
+  return (
+    document.documentElement
+      .lang ||
+    ''
+  );
 }
