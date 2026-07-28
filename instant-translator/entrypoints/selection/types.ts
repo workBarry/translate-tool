@@ -1,15 +1,17 @@
-export type TranslationStatus =
-  | 'hidden'
-  | 'loading'
-  | 'success'
-  | 'error';
+export type TranslationStatus = "hidden" | "loading" | "success" | "error";
 
-export type SpeechActionStatus =
+export type TranslationLanguage = "zh-Hant" | "en" | "ja" | "ko";
+
+export type SpeechPlaybackStatus =
   | 'idle'
   | 'starting'
+  | 'speaking'
   | 'stopping'
   | 'error';
 
+export type SpeechTarget =
+  | 'source'
+  | 'translation';
 export interface TranslationPopoverState {
   status: TranslationStatus;
 
@@ -20,8 +22,15 @@ export interface TranslationPopoverState {
   left: number;
   top: number;
 
-  speechActionStatus:
-    SpeechActionStatus;
+  targetLanguage: TranslationLanguage;
+
+  detectedSourceLanguage: string;
+
+  speechPlaybackStatus:
+    SpeechPlaybackStatus;
+
+  activeSpeechTarget:
+    SpeechTarget | null;
 
   speechErrorMessage: string;
 }

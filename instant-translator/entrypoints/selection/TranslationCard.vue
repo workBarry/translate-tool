@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import {
   computed,
-  nextTick,
-  ref,
-  watch,
 } from 'vue';
 
 import type {
+  SpeechTarget,
+  TranslationLanguage,
   TranslationPopoverState,
 } from './types';
 
@@ -16,62 +15,82 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'close'): void;
-
+  (event: 'speak-source'): void;
+  (event: 'speak-translation'): void;
+  (event: 'stop-speech'): void;
   (
-    event: 'speak-source',
-  ): void;
-
-  (
-    event: 'speak-translation',
-  ): void;
-
-  (
-    event: 'stop-speech',
+    event: 'change-target-language',
+    targetLanguage: TranslationLanguage,
   ): void;
 }>();
 
-const cardElement =
-  ref<HTMLElement | null>(null);
+const languageOptions: ReadonlyArray<{
+  value: TranslationLanguage;
+  label: string;
+}> = [
+  { value: 'zh-Hant', label: '繁體中文' },
+  { value: 'en', label: 'English' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+];
 
-const isSpeechBusy =
-  computed(() => {
-    return (
-      props.state
-        .speechActionStatus ===
-        'starting' ||
-      props.state
-        .speechActionStatus ===
-        'stopping'
-    );
-  });
+const sourceLanguageLabel = computed(() => {
+  switch (props.state.detectedSourceLanguage) {
+    case 'zh-Hant':
+      return '繁體中文';
+    case 'zh':
+      return '中文';
+    case 'en':
+      return 'English';
+    case 'ja':
+      return '日本語';
+    case 'ko':
+      return '한국어';
+    default:
+      return props.state.detectedSourceLanguage || '自動偵測';
+  }
+});
 
-watch(
-  () => props.state.status,
-  async (status) => {
-    await nextTick();
+const isSpeechActive = computed(() => {
+  return (
+    props.state.speechPlaybackStatus === 'starting' ||
+    props.state.speechPlaybackStatus === 'speaking'
+  );
+});
 
-    console.log(
-      '[Instant Translator] 卡片狀態',
-      {
-        status,
-        card:
-          cardElement.value,
+const isStoppingSpeech = computed(() => {
+  return props.state.speechPlaybackStatus === 'stopping';
+});
 
-        rect:
-          cardElement.value
-            ?.getBoundingClientRect() ??
-          null,
-      },
-    );
-  },
-);
+function isTargetSpeaking(
+  target: SpeechTarget,
+): boolean {
+  return (
+    isSpeechActive.value &&
+    props.state.activeSpeechTarget === target
+  );
+}
+
+function handleTargetLanguageChange(
+  event: Event,
+): void {
+  const target = event.target;
+
+  if (!(target instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  emit(
+    'change-target-language',
+    target.value as TranslationLanguage,
+  );
+}
 </script>
 
 <template>
   <Transition name="translation-card">
     <section
       v-if="state.status !== 'hidden'"
-      ref="cardElement"
       class="translation-card"
       :style="{
         left: `${state.left}px`,
@@ -99,21 +118,63 @@ watch(
         </button>
       </header>
 
+      <div class="translation-card__language-row">
+        <div class="translation-card__language-info">
+          <span class="translation-card__language-label">
+            原文語言
+          </span>
+
+          <span class="translation-card__language-value">
+            {{ sourceLanguageLabel }}
+          </span>
+        </div>
+
+        <span
+          class="translation-card__language-arrow"
+          aria-hidden="true"
+        >
+          →
+        </span>
+
+        <label class="translation-card__language-select-wrapper">
+          <span class="translation-card__language-label">
+            翻譯成
+          </span>
+
+          <select
+            class="translation-card__language-select"
+            :value="state.targetLanguage"
+            aria-label="選擇翻譯語言"
+            @change="handleTargetLanguageChange"
+          >
+            <option
+              v-for="language in languageOptions"
+              :key="language.value"
+              :value="language.value"
+            >
+              {{ language.label }}
+            </option>
+          </select>
+        </label>
+      </div>
+
       <div class="translation-card__content">
         <section class="translation-card__section">
           <div class="translation-card__section-heading">
-            <p class="translation-card__label">
-              原文
-            </p>
+            <p class="translation-card__label">原文</p>
 
             <button
               type="button"
               class="translation-card__speech-button"
-              :disabled="isSpeechBusy"
+              :class="{
+                'translation-card__speech-button--active':
+                  isTargetSpeaking('source'),
+              }"
+              :disabled="isStoppingSpeech"
               aria-label="朗讀原文"
               @click="emit('speak-source')"
             >
-              ▶ 原文發音
+              {{ isTargetSpeaking('source') ? '■ 停止原文' : '▶ 原文發音' }}
             </button>
           </div>
 
@@ -126,23 +187,27 @@ watch(
 
         <section class="translation-card__section">
           <div class="translation-card__section-heading">
-            <p class="translation-card__label">
-              翻譯
-            </p>
+            <p class="translation-card__label">翻譯</p>
 
             <button
               type="button"
               class="translation-card__speech-button"
+              :class="{
+                'translation-card__speech-button--active':
+                  isTargetSpeaking('translation'),
+              }"
               :disabled="
-                isSpeechBusy ||
+                isStoppingSpeech ||
                 state.status !== 'success'
               "
               aria-label="朗讀譯文"
-              @click="
-                emit('speak-translation')
-              "
+              @click="emit('speak-translation')"
             >
-              ▶ 譯文發音
+              {{
+                isTargetSpeaking('translation')
+                  ? '■ 停止譯文'
+                  : '▶ 譯文發音'
+              }}
             </button>
           </div>
 
@@ -160,10 +225,7 @@ watch(
 
           <p
             v-else-if="state.status === 'success'"
-            class="
-              translation-card__text
-              translation-card__translated-text
-            "
+            class="translation-card__text translation-card__translated-text"
           >
             {{ state.translatedText }}
           </p>
@@ -174,35 +236,12 @@ watch(
             role="alert"
           >
             <strong>翻譯失敗</strong>
-
-            <span>
-              {{ state.errorMessage }}
-            </span>
+            <span>{{ state.errorMessage }}</span>
           </div>
         </section>
 
-        <div class="translation-card__speech-actions">
-          <button
-            type="button"
-            class="
-              translation-card__speech-button
-              translation-card__stop-button
-            "
-            :disabled="
-              state.speechActionStatus ===
-              'stopping'
-            "
-            @click="emit('stop-speech')"
-          >
-            ■ 停止發音
-          </button>
-        </div>
-
         <p
-          v-if="
-            state.speechActionStatus ===
-            'error'
-          "
+          v-if="state.speechPlaybackStatus === 'error'"
           class="translation-card__speech-error"
           role="alert"
         >
@@ -211,45 +250,22 @@ watch(
       </div>
 
       <footer class="translation-card__footer">
-        <span
-          v-if="
-            state.speechActionStatus ===
-            'starting'
-          "
-        >
+        <span v-if="state.speechPlaybackStatus === 'starting'">
           正在啟動發音……
         </span>
-
-        <span
-          v-else-if="
-            state.speechActionStatus ===
-            'stopping'
-          "
-        >
+        <span v-else-if="state.speechPlaybackStatus === 'speaking'">
+          正在發音，點擊同一按鈕即可停止
+        </span>
+        <span v-else-if="state.speechPlaybackStatus === 'stopping'">
           正在停止發音……
         </span>
-
-        <span
-          v-else-if="
-            state.status === 'loading'
-          "
-        >
-          正在使用模擬翻譯服務
+        <span v-else-if="state.status === 'loading'">
+          正在使用 Chrome 內建翻譯
         </span>
-
-        <span
-          v-else-if="
-            state.status === 'success'
-          "
-        >
-          模擬翻譯結果
+        <span v-else-if="state.status === 'success'">
+          Chrome 內建翻譯結果
         </span>
-
-        <span
-          v-else-if="
-            state.status === 'error'
-          "
-        >
+        <span v-else-if="state.status === 'error'">
           請重新選取文字再試一次
         </span>
       </footer>

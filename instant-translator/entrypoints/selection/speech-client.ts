@@ -14,6 +14,7 @@ import type {
 } from '../../src/shared/speech-messages';
 
 export interface SpeakTextInput {
+  requestId: string;
   text: string;
   target: SpeechTarget;
   lang?: string;
@@ -37,9 +38,9 @@ export class SpeechClientError
 export async function speakTextInBackground(
   input: SpeakTextInput,
 ): Promise<void> {
-  const requestId =
-    crypto.randomUUID();
-
+  const {
+    requestId,
+  } = input;
   const message:
     SpeakTextMessage = {
       type:

@@ -6,6 +6,8 @@ export default defineConfig({
   ],
 
   manifest: {
+    minimum_chrome_version: '138',
+
     permissions: [
       'tts',
     ],

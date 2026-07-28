@@ -1,43 +1,60 @@
 .translation-card {
-  position: fixed;
+  position: fixed !important;
+
   display: block;
-  /*
-   * Shadow Host 與外層 container 使用 none，
-   * 只有真正卡片可以接收滑鼠操作。
-   */
-  pointer-events: auto;
-
-  /*
-   * 在目前 Shadow Host stacking context 中置頂。
-   */
-  z-index: 2147483647;
-
   box-sizing: border-box;
-  width: 320px;
-  max-width: calc(100vw - 16px);
+
+  width: min(
+    320px,
+    calc(100vw - 16px)
+  );
+
+  min-width: 0;
+  max-width: none;
   max-height: calc(100vh - 16px);
-  overflow: auto;
 
   margin: 0;
   padding: 0;
+  overflow: auto;
 
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "Microsoft JhengHei",
-    Arial,
-    sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-
-  color: #1f2937;
+  /*
+   * Shadow Host 和外層容器本來就是透明的，
+   * 因此實際卡片必須自行設定背景。
+   */
   background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  color: #18181b;
+
+  opacity: 1;
+  visibility: visible;
+
+  border: 1px solid #e4e4e7;
   border-radius: 12px;
+
   box-shadow:
-    0 12px 30px rgba(15, 23, 42, 0.18),
-    0 2px 8px rgba(15, 23, 42, 0.1);
+    0 12px 32px
+      rgb(0 0 0 / 18%);
+
+  color-scheme: light;
+  isolation: isolate;
+  mix-blend-mode: normal;
+  backdrop-filter: none;
+
+  pointer-events: auto !important;
+  z-index: 2147483647;
+}
+.translation-card__header,
+.translation-card__content,
+.translation-card__footer,
+.translation-card__language-row {
+  background: #ffffff;
+}
+
+.translation-card__header {
+  border-radius: 12px 12px 0 0;
+}
+
+.translation-card__footer {
+  border-radius: 0 0 12px 12px;
 }
 
 .translation-card__header {
@@ -191,6 +208,7 @@
 .translation-card__footer {
   box-sizing: border-box;
   padding: 9px 14px;
+  min-height: 20px;
 
   font-size: 11px;
   line-height: 16px;
@@ -204,14 +222,17 @@
 .translation-card-enter-active,
 .translation-card-leave-active {
   transition:
-    opacity 120ms ease,
-    transform 120ms ease;
+    opacity 120ms ease;
 }
 
 .translation-card-enter-from,
 .translation-card-leave-to {
   opacity: 0;
-  transform: translateY(4px) scale(0.98);
+}
+
+.translation-card-enter-to,
+.translation-card-leave-from {
+  opacity: 1;
 }
 
 .translation-card__section-heading {
@@ -221,13 +242,10 @@
   gap: 12px;
 }
 
-.translation-card__speech-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
 
 .translation-card__speech-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
   box-sizing: border-box;
   min-height: 30px;
   padding: 5px 10px;
@@ -267,9 +285,41 @@
   cursor: not-allowed;
   opacity: 0.45;
 }
+.translation-card__speech-button {
+  flex: 0 0 auto;
 
-.translation-card__stop-button {
+  box-sizing: border-box;
+  min-width: 92px;
+  min-height: 30px;
+
+  padding: 5px 10px;
+
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+
+  background: #ffffff;
+  color: #27272a;
+
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+
+  text-align: center;
+  white-space: nowrap;
+
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.translation-card__speech-button--active {
+  border-color: #dc2626;
+  background: #fef2f2;
   color: #b91c1c;
+}
+
+.translation-card__speech-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .translation-card__speech-error {
@@ -282,6 +332,79 @@
 
   font-size: 12px;
   line-height: 1.5;
+}
+.translation-card__language-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    auto
+    minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+
+  padding: 10px 14px;
+
+  border-bottom:
+    1px solid #e4e4e7;
+}
+
+.translation-card__language-info,
+.translation-card__language-select-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  min-width: 0;
+}
+
+.translation-card__language-label {
+  color: #71717a;
+
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.translation-card__language-value {
+  overflow: hidden;
+
+  color: #27272a;
+
+  font-size: 13px;
+  line-height: 30px;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.translation-card__language-arrow {
+  padding-bottom: 7px;
+
+  color: #a1a1aa;
+}
+
+.translation-card__language-select {
+  box-sizing: border-box;
+
+  width: 100%;
+  height: 30px;
+  padding: 4px 26px 4px 8px;
+
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+
+  background: #ffffff;
+  color: #27272a;
+
+  font: inherit;
+  font-size: 13px;
+
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.translation-card__language-select:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
 }
 @keyframes translation-card-spin {
   from {

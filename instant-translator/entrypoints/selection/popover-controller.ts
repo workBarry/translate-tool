@@ -1,5 +1,6 @@
 import type {
   PopoverPosition,
+  SpeechTarget,
   TranslationPopoverState,
 } from './types';
 
@@ -54,48 +55,69 @@ export class PopoverController {
       'error';
   }
 
-  beginSpeech(): void {
-    this.state.speechActionStatus =
-      'starting';
+ beginSpeech(
+  target: SpeechTarget,
+): void {
+  this.state.activeSpeechTarget =
+    target;
 
-    this.state.speechErrorMessage =
-      '';
-  }
+  this.state.speechPlaybackStatus =
+    'starting';
 
-  beginStopSpeech(): void {
-    this.state.speechActionStatus =
-      'stopping';
+  this.state.speechErrorMessage =
+    '';
+}
 
-    this.state.speechErrorMessage =
-      '';
-  }
+markSpeechStarted(): void {
+  this.state.speechPlaybackStatus =
+    'speaking';
 
-  finishSpeechAction(): void {
-    this.state.speechActionStatus =
-      'idle';
+  this.state.speechErrorMessage =
+    '';
+}
 
-    this.state.speechErrorMessage =
-      '';
-  }
+beginStopSpeech(): void {
+  this.state.speechPlaybackStatus =
+    'stopping';
 
-  showSpeechError(
-    message: string,
-  ): void {
-    this.state.speechActionStatus =
-      'error';
+  this.state.speechErrorMessage =
+    '';
+}
 
-    this.state.speechErrorMessage =
-      message;
-  }
+finishSpeech(): void {
+  this.state.speechPlaybackStatus =
+    'idle';
 
-  resetSpeechState(): void {
-    this.state.speechActionStatus =
-      'idle';
+  this.state.activeSpeechTarget =
+    null;
 
-    this.state.speechErrorMessage =
-      '';
-  }
+  this.state.speechErrorMessage =
+    '';
+}
 
+showSpeechError(
+  message: string,
+): void {
+  this.state.speechPlaybackStatus =
+    'error';
+
+  this.state.activeSpeechTarget =
+    null;
+
+  this.state.speechErrorMessage =
+    message;
+}
+
+resetSpeechState(): void {
+  this.state.speechPlaybackStatus =
+    'idle';
+
+  this.state.activeSpeechTarget =
+    null;
+
+  this.state.speechErrorMessage =
+    '';
+}
   hide(): void {
     this.resetSpeechState();
 

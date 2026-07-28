@@ -6,10 +6,13 @@ import {
 import {
   isSpeakTextMessage,
   isStopSpeechMessage,
+  SPEECH_MESSAGE_TYPE,
 } from '../shared/speech-messages';
 
 import type {
   SpeakTextMessage,
+  SpeechPlaybackEventMessage,
+  SpeechPlaybackEventType,
   SpeechResponse,
   StopSpeechMessage,
 } from '../shared/speech-messages';
@@ -54,7 +57,7 @@ export function registerSpeechMessageHandler():
       }
 
       if (isSpeakTextMessage(message)) {
-        void handleSpeakText(message)
+        void handleSpeakText(message,sender,)
           .then((response) => {
             sendResponse(response);
           })
@@ -110,7 +113,9 @@ export function registerSpeechMessageHandler():
 
 async function handleSpeakText(
   message: SpeakTextMessage,
-): Promise<SpeechResponse> {
+  sender:
+    Browser.runtime.MessageSender,
+  ): Promise<SpeechResponse> {
   const {
     requestId,
     text,
@@ -207,36 +212,50 @@ async function handleSpeakText(
       volume: 1,
       enqueue: false,
 
-      onEvent(event) {
-        console.log(
-          '[Instant Translator Background] TTS 事件',
-          {
-            requestId,
-            target,
-            type: event.type,
+onEvent(event) {
+  console.log(
+    '[Instant Translator Background] TTS 事件',
+    {
+      requestId,
+      target,
+      type: event.type,
+      charIndex:
+        event.charIndex,
+      errorMessage:
+        event.errorMessage,
+    },
+  );
 
-            charIndex:
-              event.charIndex,
+  if (
+    isPlaybackEventType(
+      event.type,
+    )
+  ) {
+    void sendPlaybackEvent(
+      sender,
+      {
+        type:
+          SPEECH_MESSAGE_TYPE
+            .SPEECH_PLAYBACK_EVENT,
 
-            errorMessage:
-              event.errorMessage,
-          },
-        );
+        payload: {
+          requestId,
+          target,
 
-        if (
-          event.type === 'error'
-        ) {
-          console.error(
-            '[Instant Translator Background] TTS 引擎錯誤',
-            {
-              requestId,
+          eventType:
+            event.type,
 
-              errorMessage:
-                event.errorMessage,
-            },
-          );
-        }
+          ...(event.errorMessage
+            ? {
+                errorMessage:
+                  event.errorMessage,
+              }
+            : {}),
+        },
       },
+    );
+  }
+},
     };
 
   if (lang) {
@@ -371,4 +390,66 @@ function clamp(
       value,
     ),
   );
+}
+
+function isPlaybackEventType(
+  eventType:
+    Browser.tts.TtsEvent['type'],
+): eventType is
+  SpeechPlaybackEventType {
+  return (
+    eventType === 'start' ||
+    eventType === 'end' ||
+    eventType ===
+      'interrupted' ||
+    eventType ===
+      'cancelled' ||
+    eventType === 'error'
+  );
+}
+
+async function sendPlaybackEvent(
+  sender:
+    Browser.runtime.MessageSender,
+
+  message:
+    SpeechPlaybackEventMessage,
+): Promise<void> {
+  const tabId =
+    sender.tab?.id;
+
+  if (tabId === undefined) {
+    return;
+  }
+
+  try {
+    const options =
+      sender.frameId !== undefined
+        ? {
+            frameId:
+              sender.frameId,
+          }
+        : undefined;
+
+    await browser.tabs.sendMessage(
+      tabId,
+      message,
+      options,
+    );
+  } catch (error: unknown) {
+    /*
+     * 使用者可能已關閉分頁，
+     * 或 Content Script 已失效。
+     */
+    console.debug(
+      '[Instant Translator Background] 無法傳送 TTS 狀態',
+      {
+        tabId,
+        requestId:
+          message.payload
+            .requestId,
+        error,
+      },
+    );
+  }
 }

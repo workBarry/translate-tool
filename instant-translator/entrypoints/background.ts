@@ -30,7 +30,7 @@ export default defineBackground(() => {
   console.log(
     '[Instant Translator Background] Service Worker 已啟動',
   );
-  
+
   registerSpeechMessageHandler();
 
   const activeRequests =
@@ -42,69 +42,6 @@ export default defineBackground(() => {
   const cancelledRequestIds =
     new Set<string>();
 
-  browser.runtime.onMessage.addListener(
-    (
-      message: unknown,
-      sender: Browser.runtime.MessageSender,
-      sendResponse,
-    ) => {
-      /*
-       * runtime.onMessage 原則上只處理擴充功能內部訊息，
-       * 這裡仍然檢查 sender.id。
-       */
-      if (sender.id !== browser.runtime.id) {
-        return;
-      }
-
-      if (isTranslateTextMessage(message)) {
-        void handleTranslateMessage(
-          message,
-          activeRequests,
-          cancelledRequestIds,
-        )
-          .then(sendResponse)
-          .catch((error: unknown) => {
-            console.error(
-              '[Instant Translator Background] 未預期錯誤',
-              error,
-            );
-
-            const response: TranslateTextResponse = {
-              ok: false,
-              requestId: message.payload.requestId,
-              error: {
-                code: 'TRANSLATION_FAILED',
-                message: '背景翻譯服務發生未知錯誤',
-              },
-            };
-
-            sendResponse(response);
-          });
-
-        /*
-         * 非同步呼叫 sendResponse 時必須回傳 true，
-         * 保持訊息通道開啟。
-         */
-        return true;
-      }
-
-      if (isCancelTranslationMessage(message)) {
-        const response =
-          handleCancelTranslationMessage(
-            message,
-            activeRequests,
-            cancelledRequestIds,
-          );
-
-        sendResponse(response);
-
-        return false;
-      }
-
-      // 未知或格式錯誤的訊息不執行任何操作。
-      return;
-    },
-  );
 });
 
 async function handleTranslateMessage(
