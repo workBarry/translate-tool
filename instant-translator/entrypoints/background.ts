@@ -20,12 +20,18 @@ import type {
   TranslateTextResponse,
 } from '../src/shared/translation-messages';
 
+import {
+  registerSpeechMessageHandler,
+} from '../src/background/speech-message-handler';
+
 const MAX_TEXT_LENGTH = 500;
 
 export default defineBackground(() => {
   console.log(
     '[Instant Translator Background] Service Worker 已啟動',
   );
+  
+  registerSpeechMessageHandler();
 
   const activeRequests =
     new Map<string, AbortController>();

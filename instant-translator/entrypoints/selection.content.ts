@@ -7,6 +7,12 @@ import {
   reactive,
 } from 'vue';
 
+import {
+  detectSpeechLanguage,
+  speakTextInBackground,
+  stopSpeechInBackground,
+} from './selection/speech-client';
+
 import TranslationCard from './selection/TranslationCard.vue';
 import { PopoverController } from './selection/popover-controller';
 import { calculatePopoverPosition } from './selection/position-calculator';
@@ -102,13 +108,20 @@ export default defineContentScript({
     const state =
       reactive<TranslationPopoverState>({
         status: 'hidden',
+
         sourceText: '',
         translatedText: '',
         errorMessage: '',
+
         left: 0,
         top: 0,
-      });
 
+        speechActionStatus:
+          'idle',
+
+        speechErrorMessage:
+          '',
+      });
     const popoverController =
       new PopoverController(state);
 
@@ -154,12 +167,127 @@ export default defineContentScript({
         controller?.abort();
       };
 
-    const hidePopover = (): void => {
-      latestRequestId = null;
+      const speakSourceText =
+  async (): Promise<void> => {
+    const text =
+      state.sourceText.trim();
 
-      abortActiveTranslation();
-      popoverController.hide();
-    };
+    if (!text) {
+      return;
+    }
+
+    popoverController.beginSpeech();
+
+    try {
+      await speakTextInBackground({
+        text,
+        target: 'source',
+
+        lang:
+          detectSpeechLanguage(
+            text,
+          ),
+
+        rate: 1,
+        pitch: 1,
+      });
+
+      popoverController
+        .finishSpeechAction();
+    } catch (error: unknown) {
+      console.error(
+        '[Instant Translator] 原文發音失敗',
+        error,
+      );
+
+      popoverController.showSpeechError(
+        error instanceof Error
+          ? error.message
+          : '原文發音失敗',
+      );
+    }
+  };
+
+const speakTranslatedText =
+  async (): Promise<void> => {
+    const text =
+      state.translatedText.trim();
+
+    if (!text) {
+      return;
+    }
+
+    popoverController.beginSpeech();
+
+    try {
+      await speakTextInBackground({
+        text,
+        target:
+          'translation',
+
+        /*
+         * 目前目標語言固定為繁體中文。
+         */
+        lang: 'zh-TW',
+
+        rate: 1,
+        pitch: 1,
+      });
+
+      popoverController
+        .finishSpeechAction();
+    } catch (error: unknown) {
+      console.error(
+        '[Instant Translator] 譯文發音失敗',
+        error,
+      );
+
+      popoverController.showSpeechError(
+        error instanceof Error
+          ? error.message
+          : '譯文發音失敗',
+      );
+    }
+  };
+
+    const stopCurrentSpeech =
+      async (): Promise<void> => {
+        popoverController
+          .beginStopSpeech();
+
+        try {
+          await stopSpeechInBackground();
+
+          popoverController
+            .finishSpeechAction();
+        } catch (error: unknown) {
+          console.error(
+            '[Instant Translator] 停止發音失敗',
+            error,
+          );
+
+          popoverController.showSpeechError(
+            error instanceof Error
+              ? error.message
+              : '無法停止發音',
+          );
+        }
+      };
+const hidePopover = (): void => {
+  latestRequestId = null;
+
+  abortActiveTranslation();
+
+  /*
+   * 關閉卡片時一併停止發音。
+   */
+  void stopSpeechInBackground()
+    .catch(() => {
+      // 關閉卡片時不再顯示發音錯誤。
+    });
+
+  popoverController.hide();
+};
 
     /**
      * 移除舊版程式或 HMR 遺留的宿主。
@@ -266,8 +394,18 @@ export default defineContentScript({
                     TranslationCard,
                     {
                       state,
+
                       onClose:
                         hidePopover,
+
+                      onSpeakSource:
+                        speakSourceText,
+
+                      onSpeakTranslation:
+                        speakTranslatedText,
+
+                      onStopSpeech:
+                        stopCurrentSpeech,
                     },
                   );
 
@@ -729,7 +867,10 @@ export default defineContentScript({
           GLOBAL_INSTANCE_KEY
         ];
       }
-
+      void stopSpeechInBackground()
+        .catch(() => {
+          // 擴充功能失效時不再處理錯誤。
+        });
       console.log(
         '[Instant Translator] Content Script 已清理',
         {

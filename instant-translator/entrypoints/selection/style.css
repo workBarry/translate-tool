@@ -214,6 +214,75 @@
   transform: translateY(4px) scale(0.98);
 }
 
+.translation-card__section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.translation-card__speech-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.translation-card__speech-button {
+  box-sizing: border-box;
+  min-height: 30px;
+  padding: 5px 10px;
+
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+
+  background: #ffffff;
+  color: #27272a;
+
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+
+  cursor: pointer;
+  pointer-events: auto;
+
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.translation-card__speech-button:hover:not(
+  :disabled
+) {
+  background: #f4f4f5;
+  border-color: #a1a1aa;
+}
+
+.translation-card__speech-button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.translation-card__speech-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.translation-card__stop-button {
+  color: #b91c1c;
+}
+
+.translation-card__speech-error {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #b91c1c;
+
+  font-size: 12px;
+  line-height: 1.5;
+}
 @keyframes translation-card-spin {
   from {
     transform: rotate(0deg);

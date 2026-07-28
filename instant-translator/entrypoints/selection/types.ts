@@ -4,13 +4,26 @@ export type TranslationStatus =
   | 'success'
   | 'error';
 
+export type SpeechActionStatus =
+  | 'idle'
+  | 'starting'
+  | 'stopping'
+  | 'error';
+
 export interface TranslationPopoverState {
   status: TranslationStatus;
+
   sourceText: string;
   translatedText: string;
   errorMessage: string;
+
   left: number;
   top: number;
+
+  speechActionStatus:
+    SpeechActionStatus;
+
+  speechErrorMessage: string;
 }
 
 export interface PopoverPosition {
