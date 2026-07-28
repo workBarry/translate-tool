@@ -23,8 +23,3 @@ export interface TextSelection {
   pointerX: number;
   pointerY: number;
 }
-
-export interface TranslationResult {
-  originalText: string;
-  translatedText: string;
-}

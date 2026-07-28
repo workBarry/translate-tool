@@ -1,18 +1,51 @@
 <script setup lang="ts">
-import type { TranslationPopoverState } from './types';
+import {
+  nextTick,
+  ref,
+  watch,
+} from 'vue';
 
-defineProps<{
+import type {
+  TranslationPopoverState,
+} from './types';
+
+const props = defineProps<{
   state: TranslationPopoverState;
 }>();
 
 const emit = defineEmits<{
   (event: 'close'): void;
 }>();
+
+const cardElement =
+  ref<HTMLElement | null>(null);
+
+watch(
+  () => props.state.status,
+  async (status) => {
+    await nextTick();
+
+    const card =
+      cardElement.value;
+
+    console.log(
+      '[Instant Translator] 卡片狀態',
+      {
+        status,
+        card,
+        rect:
+          card?.getBoundingClientRect() ??
+          null,
+      },
+    );
+  },
+);
 </script>
 
 <template>
   <Transition name="translation-card">
     <section
+      ref="cardElement"
       v-if="state.status !== 'hidden'"
       class="translation-card"
       :style="{
@@ -23,7 +56,9 @@ const emit = defineEmits<{
       aria-label="即時翻譯"
       aria-live="polite"
       @pointerdown.stop
-    >
+      @pointerup.stop
+      @click.stop    
+      >
       <header class="translation-card__header">
         <span class="translation-card__title">
           即時翻譯

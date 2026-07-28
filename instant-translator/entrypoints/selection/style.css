@@ -1,5 +1,17 @@
 .translation-card {
   position: fixed;
+  display: block;
+  /*
+   * Shadow Host 與外層 container 使用 none，
+   * 只有真正卡片可以接收滑鼠操作。
+   */
+  pointer-events: auto;
+
+  /*
+   * 在目前 Shadow Host stacking context 中置頂。
+   */
+  z-index: 2147483647;
+
   box-sizing: border-box;
   width: 320px;
   max-width: calc(100vw - 16px);

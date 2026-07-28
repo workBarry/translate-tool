@@ -1,4 +1,4 @@
-import type { TranslationResult } from './types';
+import type { TranslationResult } from '../shared/translation-messages';
 
 const FAKE_DICTIONARY: Record<string, string> = {
   hello: '你好',
@@ -11,35 +11,45 @@ const FAKE_DICTIONARY: Record<string, string> = {
   'instant translator': '即時翻譯工具',
 };
 
-export async function translateText(
-  text: string,
-  signal?: AbortSignal,
+export interface FakeTranslationInput {
+  text: string;
+  targetLanguage: string;
+}
+
+export async function translateWithFakeProvider(
+  input: FakeTranslationInput,
+  signal: AbortSignal,
 ): Promise<TranslationResult> {
-  // 根據文字長度產生不同等待時間，
-  // 用來模擬真實網路請求。
   const delayMilliseconds =
-    700 + Math.min(text.length * 20, 1_300);
+    700 +
+    Math.min(input.text.length * 20, 1_300);
 
   await wait(delayMilliseconds, signal);
 
-  const normalizedText = text
+  const normalizedText = input.text
     .trim()
     .toLocaleLowerCase('en-US');
 
-  // 選取單獨的 error，可以測試錯誤畫面。
+  // 用來測試錯誤狀態。
   if (normalizedText === 'error') {
-    throw new Error('模擬翻譯服務發生錯誤');
+    throw new Error(
+      '模擬翻譯服務發生錯誤',
+    );
   }
 
   const dictionaryResult =
     FAKE_DICTIONARY[normalizedText];
 
   return {
-    originalText: text,
+    originalText: input.text,
 
     translatedText:
       dictionaryResult ??
-      `【模擬翻譯】${text}`,
+      `【模擬翻譯】${input.text}`,
+
+    detectedLanguage: 'en',
+    targetLanguage: input.targetLanguage,
+    provider: 'fake',
   };
 }
 
@@ -54,22 +64,24 @@ export function isAbortError(
 
 function wait(
   milliseconds: number,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
+    if (signal.aborted) {
       reject(createAbortError());
       return;
     }
 
-    let timerId: number | undefined;
+    let timerId:
+      | ReturnType<typeof setTimeout>
+      | undefined;
 
     const handleAbort = (): void => {
       if (timerId !== undefined) {
-        window.clearTimeout(timerId);
+        globalThis.clearTimeout(timerId);
       }
 
-      signal?.removeEventListener(
+      signal.removeEventListener(
         'abort',
         handleAbort,
       );
@@ -77,8 +89,8 @@ function wait(
       reject(createAbortError());
     };
 
-    timerId = window.setTimeout(() => {
-      signal?.removeEventListener(
+    timerId = globalThis.setTimeout(() => {
+      signal.removeEventListener(
         'abort',
         handleAbort,
       );
@@ -86,7 +98,7 @@ function wait(
       resolve();
     }, milliseconds);
 
-    signal?.addEventListener(
+    signal.addEventListener(
       'abort',
       handleAbort,
       {
