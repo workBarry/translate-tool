@@ -1,14 +1,14 @@
+import type {
+  SourceLanguageSetting,
+  TranslationLanguage,
+} from '../../src/shared/translator-settings.types';
+
+export type {
+  SourceLanguageSetting,
+  TranslationLanguage,
+} from '../../src/shared/translator-settings.types';
+
 export type TranslationStatus = "hidden" | "loading" | "success" | "error";
-
-export type TranslationLanguage = "zh-Hant" | "en" | "ja" | "ko";
-
-export type SourceLanguageSetting =
-  | 'auto'
-  | 'zh'
-  | 'zh-Hant'
-  | 'en'
-  | 'ja'
-  | 'ko';
 
 export type TranslationModelStatus =
   | 'idle'
@@ -28,6 +28,7 @@ export type SpeechTarget =
   | 'translation';
 export interface TranslationPopoverState {
   status: TranslationStatus;
+  enabled: boolean;
 
   sourceText: string;
   translatedText: string;

@@ -1,22 +1,25 @@
 import { browser, type Browser } from "wxt/browser";
+import {
+  loadTranslatorSettings,
+  saveTranslatorSettings,
+  watchTranslatorSettings,
+} from "../src/shared/translator-settings.storage";
+
+import { DEFAULT_TRANSLATOR_SETTINGS } from "../src/shared/translator-settings.types";
+
+import type { TranslatorSettings } from "../src/shared/translator-settings.types";
 
 import { isSpeechPlaybackEventMessage } from "../src/shared/speech-messages";
 
-import type {
-  PopoverPosition,
-  SourceLanguageSetting,
-  SpeechTarget,
-} from "./selection/types";
+import type { PopoverPosition, SourceLanguageSetting, SpeechTarget } from "./selection/types";
 import { createShadowRootUi, defineContentScript } from "#imports";
 import { createApp, reactive } from "vue";
-import {
-  destroyAllTranslatorSessions,
-} from './selection/translator-session-cache';
+import { destroyAllTranslatorSessions } from "./selection/translator-session-cache";
 import {
   destroyLanguageDetector,
   resolveImmediateSourceLanguage,
   resolveSourceLanguageWithDetector,
-} from './selection/language-detector.service';
+} from "./selection/language-detector.service";
 import {
   detectSpeechLanguage,
   speakTextInBackground,
@@ -88,11 +91,26 @@ export default defineContentScript({
       instanceId,
       url: window.location.href,
     });
+    const initialSettings = await loadTranslatorSettings().catch((error: unknown) => {
+      console.error("[Instant Translator] 載入設定失敗", error);
 
+      return {
+        ...DEFAULT_TRANSLATOR_SETTINGS,
+      };
+    });
+
+    if (ctx.isInvalid || !isCurrentInstance()) {
+      return;
+    }
     /*
      * Vue 卡片共用狀態。
      */
     const state = reactive<TranslationPopoverState>({
+      enabled: initialSettings.enabled,
+
+      sourceLanguageSetting: initialSettings.sourceLanguageSetting,
+
+      targetLanguage: initialSettings.targetLanguage,
       status: "hidden",
 
       sourceText: "",
@@ -102,13 +120,12 @@ export default defineContentScript({
       left: 0,
       top: 0,
 
-      sourceLanguageSetting: 'auto',
-      targetLanguage: "zh-Hant",
-
       detectedSourceLanguage: "",
+
       detectedSourceConfidence: null,
 
-      modelStatus: 'idle',
+      modelStatus: "idle",
+
       modelDownloadProgress: 0,
 
       speechPlaybackStatus: "idle",
@@ -119,13 +136,8 @@ export default defineContentScript({
     });
     const popoverController = new PopoverController(state);
 
-    function adjustPopoverPosition(
-      position: PopoverPosition,
-    ): void {
-      if (
-        ctx.isInvalid ||
-        !isCurrentInstance()
-      ) {
+    function adjustPopoverPosition(position: PopoverPosition): void {
+      if (ctx.isInvalid || !isCurrentInstance()) {
         return;
       }
 
@@ -175,17 +187,14 @@ export default defineContentScript({
       }
 
       if (
-        state.activeSpeechTarget === 'source' &&
-        (
-          state.speechPlaybackStatus === 'starting' ||
-          state.speechPlaybackStatus === 'speaking'
-        )
+        state.activeSpeechTarget === "source" &&
+        (state.speechPlaybackStatus === "starting" || state.speechPlaybackStatus === "speaking")
       ) {
         await stopCurrentSpeech();
         return;
       }
 
-      if (state.speechPlaybackStatus === 'stopping') {
+      if (state.speechPlaybackStatus === "stopping") {
         return;
       }
 
@@ -193,7 +202,7 @@ export default defineContentScript({
 
       latestSpeechRequestId = requestId;
 
-      popoverController.beginSpeech('source');
+      popoverController.beginSpeech("source");
 
       try {
         await speakTextInBackground({
@@ -206,7 +215,6 @@ export default defineContentScript({
           rate: 1,
           pitch: 1,
         });
-
       } catch (error: unknown) {
         if (latestSpeechRequestId === requestId) {
           latestSpeechRequestId = null;
@@ -226,17 +234,14 @@ export default defineContentScript({
       }
 
       if (
-        state.activeSpeechTarget === 'translation' &&
-        (
-          state.speechPlaybackStatus === 'starting' ||
-          state.speechPlaybackStatus === 'speaking'
-        )
+        state.activeSpeechTarget === "translation" &&
+        (state.speechPlaybackStatus === "starting" || state.speechPlaybackStatus === "speaking")
       ) {
         await stopCurrentSpeech();
         return;
       }
 
-      if (state.speechPlaybackStatus === 'stopping') {
+      if (state.speechPlaybackStatus === "stopping") {
         return;
       }
 
@@ -244,7 +249,7 @@ export default defineContentScript({
 
       latestSpeechRequestId = requestId;
 
-      popoverController.beginSpeech('translation');
+      popoverController.beginSpeech("translation");
 
       try {
         await speakTextInBackground({
@@ -260,7 +265,6 @@ export default defineContentScript({
           rate: 1,
           pitch: 1,
         });
-
       } catch (error: unknown) {
         if (latestSpeechRequestId === requestId) {
           latestSpeechRequestId = null;
@@ -454,88 +458,54 @@ export default defineContentScript({
       return uiMountPromise;
     };
 
-    const handleSpeechPlaybackMessage = (
-  message: unknown,
-  sender:
-    Browser.runtime.MessageSender,
-): void => {
-  if (
-    sender.id !==
-    browser.runtime.id
-  ) {
-    return;
-  }
+    const handleSpeechPlaybackMessage = (message: unknown, sender: Browser.runtime.MessageSender): void => {
+      if (sender.id !== browser.runtime.id) {
+        return;
+      }
 
-  if (
-    !isSpeechPlaybackEventMessage(
-      message,
-    )
-  ) {
-    return;
-  }
+      if (!isSpeechPlaybackEventMessage(message)) {
+        return;
+      }
 
-  const {
-    requestId,
-    eventType,
-    errorMessage,
-  } = message.payload;
+      const { requestId, eventType, errorMessage } = message.payload;
 
-  /*
-   * 忽略上一段語音遲到的
-   * interrupted 或 end。
-   */
-  if (
-    requestId !==
-    latestSpeechRequestId
-  ) {
-    return;
-  }
+      /*
+       * 忽略上一段語音遲到的
+       * interrupted 或 end。
+       */
+      if (requestId !== latestSpeechRequestId) {
+        return;
+      }
 
-  if (eventType === 'start') {
-    popoverController
-      .markSpeechStarted();
+      if (eventType === "start") {
+        popoverController.markSpeechStarted();
 
-    return;
-  }
+        return;
+      }
 
-  if (
-    eventType === 'end' ||
-    eventType ===
-      'interrupted' ||
-    eventType ===
-      'cancelled'
-  ) {
-    latestSpeechRequestId =
-      null;
+      if (eventType === "end" || eventType === "interrupted" || eventType === "cancelled") {
+        latestSpeechRequestId = null;
 
-    popoverController
-      .finishSpeech();
+        popoverController.finishSpeech();
 
-    return;
-  }
+        return;
+      }
 
-  if (eventType === 'error') {
-    latestSpeechRequestId =
-      null;
+      if (eventType === "error") {
+        latestSpeechRequestId = null;
 
-    popoverController
-      .showSpeechError(
-        errorMessage ??
-          '語音播放失敗',
-      );
-  }
-};
+        popoverController.showSpeechError(errorMessage ?? "語音播放失敗");
+      }
+    };
 
-browser.runtime.onMessage.addListener(
-  handleSpeechPlaybackMessage,
-);
+    browser.runtime.onMessage.addListener(handleSpeechPlaybackMessage);
 
     /**
      * 向 Background Service Worker
      * 發送翻譯請求。
      */
     const startTranslationLegacy = (text: string, pointerX?: number, pointerY?: number): void => {
-      if (!isCurrentInstance()) {
+      if (!state.enabled || !isCurrentInstance()) {
         return;
       }
 
@@ -566,19 +536,14 @@ browser.runtime.onMessage.addListener(
 
       popoverController.showModelDownloading(0);
 
-      const pageLanguage =
-        getSelectionLanguageHint();
+      const pageLanguage = getSelectionLanguageHint();
 
-      console.log(
-        '[Instant Translator] 準備呼叫 translateWithChrome',
-        {
-          requestId,
-          text,
-          pageLanguage,
-          targetLanguage:
-            state.targetLanguage,
-        },
-      );
+      console.log("[Instant Translator] 準備呼叫 translateWithChrome", {
+        requestId,
+        text,
+        pageLanguage,
+        targetLanguage: state.targetLanguage,
+      });
 
       /*
        * 重要：
@@ -592,24 +557,18 @@ browser.runtime.onMessage.addListener(
       const translationPromise = translateWithChrome({
         text,
 
-        sourceLanguage: 'en',
+        sourceLanguage: "en",
 
         targetLanguage: state.targetLanguage,
 
         signal: abortController.signal,
 
         onDownloadProgress(percentage) {
-          if (
-            requestId !== latestRequestId ||
-            abortController.signal.aborted ||
-            !isCurrentInstance()
-          ) {
+          if (requestId !== latestRequestId || abortController.signal.aborted || !isCurrentInstance()) {
             return;
           }
 
-          popoverController.showModelDownloading(
-            percentage,
-          );
+          popoverController.showModelDownloading(percentage);
 
           console.log("[Instant Translator] 模型下載中", {
             requestId,
@@ -618,50 +577,33 @@ browser.runtime.onMessage.addListener(
         },
 
         onPreparing() {
-          if (
-            requestId !== latestRequestId ||
-            abortController.signal.aborted ||
-            !isCurrentInstance()
-          ) {
+          if (requestId !== latestRequestId || abortController.signal.aborted || !isCurrentInstance()) {
             return;
           }
 
           popoverController.showModelPreparing();
 
-          console.log(
-            '[Instant Translator] 模型下載完成，正在準備 session',
-            {
-              requestId,
-            },
-          );
+          console.log("[Instant Translator] 模型下載完成，正在準備 session", {
+            requestId,
+          });
         },
 
         onReady() {
-          if (
-            requestId !== latestRequestId ||
-            abortController.signal.aborted ||
-            !isCurrentInstance()
-          ) {
+          if (requestId !== latestRequestId || abortController.signal.aborted || !isCurrentInstance()) {
             return;
           }
 
           popoverController.showModelReady();
 
-          console.log(
-            '[Instant Translator] Translator session 已可使用',
-            {
-              requestId,
-            },
-          );
+          console.log("[Instant Translator] Translator session 已可使用", {
+            requestId,
+          });
         },
       });
 
-      console.log(
-        '[Instant Translator] translateWithChrome 已回傳 Promise',
-        {
-          requestId,
-        },
-      );
+      console.log("[Instant Translator] translateWithChrome 已回傳 Promise", {
+        requestId,
+      });
 
       /*
        * 翻譯已開始建立後，
@@ -678,22 +620,16 @@ browser.runtime.onMessage.addListener(
 
           const result = await translationPromise;
 
-          console.log(
-            '[Instant Translator] translateWithChrome Promise 已完成',
-            {
-              requestId,
-              result,
-            },
-          );
+          console.log("[Instant Translator] translateWithChrome Promise 已完成", {
+            requestId,
+            result,
+          });
 
           if (requestId !== latestRequestId) {
-            console.log(
-              '[Instant Translator] 忽略舊翻譯結果',
-              {
-                requestId,
-                latestRequestId,
-              },
-            );
+            console.log("[Instant Translator] 忽略舊翻譯結果", {
+              requestId,
+              latestRequestId,
+            });
 
             return;
           }
@@ -706,8 +642,7 @@ browser.runtime.onMessage.addListener(
             return;
           }
 
-          state.detectedSourceLanguage =
-            result.sourceLanguage;
+          state.detectedSourceLanguage = result.sourceLanguage;
 
           popoverController.showSuccess(result.translatedText);
 
@@ -723,15 +658,11 @@ browser.runtime.onMessage.addListener(
             translatedText: result.translatedText,
           });
         } catch (error: unknown) {
-          console.error(
-            '[Instant Translator] translateWithChrome Promise 失敗',
-            {
-              requestId,
-              error,
-              aborted:
-                abortController.signal.aborted,
-            },
-          );
+          console.error("[Instant Translator] translateWithChrome Promise 失敗", {
+            requestId,
+            error,
+            aborted: abortController.signal.aborted,
+          });
 
           if (isAbortError(error)) {
             console.log("[Instant Translator] 翻譯已取消", {
@@ -763,12 +694,8 @@ browser.runtime.onMessage.addListener(
       })();
     };
 
-    function startTranslation(
-      text: string,
-      pointerX?: number,
-      pointerY?: number,
-    ): void {
-      if (!isCurrentInstance()) {
+    function startTranslation(text: string, pointerX?: number, pointerY?: number): void {
+      if (!state.enabled || ctx.isInvalid || !isCurrentInstance()) {
         return;
       }
 
@@ -787,8 +714,7 @@ browser.runtime.onMessage.addListener(
       activeAbortController = abortController;
 
       const position =
-        typeof pointerX === 'number' &&
-        typeof pointerY === 'number'
+        typeof pointerX === "number" && typeof pointerY === "number"
           ? calculatePopoverPosition(pointerX, pointerY)
           : {
               left: state.left,
@@ -797,27 +723,18 @@ browser.runtime.onMessage.addListener(
 
       const pageLanguage = getSelectionLanguageHint();
 
-      state.detectedSourceLanguage = '';
+      state.detectedSourceLanguage = "";
       state.detectedSourceConfidence = null;
 
       popoverController.showLoading(normalizedText, position);
 
-      void ensureTranslationUiMounted().catch(
-        (error: unknown) => {
-          if (
-            requestId !== latestRequestId ||
-            !isCurrentInstance()
-          ) {
-            return;
-          }
+      void ensureTranslationUiMounted().catch((error: unknown) => {
+        if (requestId !== latestRequestId || !isCurrentInstance()) {
+          return;
+        }
 
-          popoverController.showError(
-            error instanceof Error
-              ? error.message
-              : '無法建立翻譯卡片',
-          );
-        },
-      );
+        popoverController.showError(error instanceof Error ? error.message : "無法建立翻譯卡片");
+      });
 
       const immediateResolution = resolveImmediateSourceLanguage({
         text: normalizedText,
@@ -827,8 +744,7 @@ browser.runtime.onMessage.addListener(
 
       if (immediateResolution?.language) {
         state.detectedSourceLanguage = immediateResolution.language;
-        state.detectedSourceConfidence =
-          immediateResolution.confidence;
+        state.detectedSourceConfidence = immediateResolution.confidence;
 
         beginResolvedTranslation({
           requestId,
@@ -845,33 +761,20 @@ browser.runtime.onMessage.addListener(
         sourceLanguageSetting: state.sourceLanguageSetting,
         pageLanguage,
         onDownloadProgress(percentage) {
-          if (
-            requestId !== latestRequestId ||
-            abortController.signal.aborted ||
-            !isCurrentInstance()
-          ) {
+          if (requestId !== latestRequestId || abortController.signal.aborted || !isCurrentInstance()) {
             return;
           }
 
-          console.log(
-            '[Instant Translator] Language Detector 模型下載中',
-            { requestId, percentage },
-          );
+          console.log("[Instant Translator] Language Detector 模型下載中", { requestId, percentage });
         },
       })
         .then((resolution) => {
-          if (
-            requestId !== latestRequestId ||
-            abortController.signal.aborted ||
-            !isCurrentInstance()
-          ) {
+          if (requestId !== latestRequestId || abortController.signal.aborted || !isCurrentInstance()) {
             return;
           }
 
           if (!resolution.language) {
-            popoverController.showError(
-              '無法可靠判斷來源語言，請手動選擇來源語言。',
-            );
+            popoverController.showError("無法可靠判斷來源語言，請手動選擇來源語言。");
             clearActiveTranslation(abortController);
             return;
           }
@@ -887,22 +790,13 @@ browser.runtime.onMessage.addListener(
           });
         })
         .catch((error: unknown) => {
-          if (
-            requestId !== latestRequestId ||
-            abortController.signal.aborted ||
-            !isCurrentInstance()
-          ) {
+          if (requestId !== latestRequestId || abortController.signal.aborted || !isCurrentInstance()) {
             return;
           }
 
-          console.error(
-            '[Instant Translator] Language Detector 失敗',
-            { requestId, error },
-          );
+          console.error("[Instant Translator] Language Detector 失敗", { requestId, error });
 
-          popoverController.showError(
-            '來源語言偵測失敗，請手動選擇來源語言。',
-          );
+          popoverController.showError("來源語言偵測失敗，請手動選擇來源語言。");
           clearActiveTranslation(abortController);
         });
     }
@@ -913,7 +807,7 @@ browser.runtime.onMessage.addListener(
       sourceLanguage: string;
       abortController: AbortController;
     }): void {
-      console.log('[Instant Translator] 開始翻譯', {
+      console.log("[Instant Translator] 開始翻譯", {
         requestId: input.requestId,
         sourceLanguage: input.sourceLanguage,
         targetLanguage: state.targetLanguage,
@@ -969,7 +863,7 @@ browser.runtime.onMessage.addListener(
           state.detectedSourceLanguage = result.sourceLanguage;
           popoverController.showSuccess(result.translatedText);
 
-          console.log('[Instant Translator] 翻譯完成', {
+          console.log("[Instant Translator] 翻譯完成", {
             requestId: input.requestId,
             sourceLanguage: result.sourceLanguage,
             targetLanguage: result.targetLanguage,
@@ -980,65 +874,67 @@ browser.runtime.onMessage.addListener(
             return;
           }
 
-          if (
-            input.requestId !== latestRequestId ||
-            !isCurrentInstance()
-          ) {
+          if (input.requestId !== latestRequestId || !isCurrentInstance()) {
             return;
           }
 
-          console.error('[Instant Translator] 翻譯失敗', {
+          console.error("[Instant Translator] 翻譯失敗", {
             requestId: input.requestId,
             error,
           });
 
-          popoverController.showError(
-            error instanceof Error
-              ? error.message
-              : '翻譯發生未知錯誤',
-          );
+          popoverController.showError(error instanceof Error ? error.message : "翻譯發生未知錯誤");
         })
         .finally(() => {
           clearActiveTranslation(input.abortController);
         });
     }
+    function persistTranslatorSettings(): void {
+      const settings: TranslatorSettings = {
+        enabled: state.enabled,
 
-    function clearActiveTranslation(
-      abortController: AbortController,
-    ): void {
+        sourceLanguageSetting: state.sourceLanguageSetting,
+
+        targetLanguage: state.targetLanguage,
+      };
+
+      void saveTranslatorSettings(settings)
+        .then(() => {
+          console.log("[Instant Translator] 設定已保存", settings);
+        })
+        .catch((error: unknown) => {
+          /*
+           * 保存設定失敗不應破壞
+           * 目前正在進行的翻譯。
+           */
+          console.error("[Instant Translator] 保存設定失敗", {
+            settings,
+            error,
+          });
+        });
+    }
+    function clearActiveTranslation(abortController: AbortController): void {
       if (activeAbortController === abortController) {
         activeAbortController = null;
       }
     }
 
-    function changeSourceLanguage(
-      sourceLanguageSetting: SourceLanguageSetting,
-    ): void {
-      if (
-        state.sourceLanguageSetting === sourceLanguageSetting
-      ) {
+    function changeSourceLanguage(sourceLanguageSetting: SourceLanguageSetting): void {
+      if (state.sourceLanguageSetting === sourceLanguageSetting) {
         return;
       }
 
       state.sourceLanguageSetting = sourceLanguageSetting;
-      state.detectedSourceLanguage = '';
+
+      state.detectedSourceLanguage = "";
+
       state.detectedSourceConfidence = null;
 
-      const text = state.sourceText.trim();
-
-      if (!text || state.status === 'hidden') {
-        return;
-      }
-
-      startTranslation(text);
-    }
-
-    const changeTargetLanguage = (targetLanguage: TranslationLanguage): void => {
-      if (state.targetLanguage === targetLanguage) {
-        return;
-      }
-
-      state.targetLanguage = targetLanguage;
+      /*
+       * 即使目前沒有開啟卡片，
+       * 也要保存使用者設定。
+       */
+      persistTranslatorSettings();
 
       const text = state.sourceText.trim();
 
@@ -1046,16 +942,82 @@ browser.runtime.onMessage.addListener(
         return;
       }
 
-      /*
-       * 不傳滑鼠座標，
-       * 使用目前卡片位置重新翻譯。
-       */
       startTranslation(text);
-    };
+    }
+
+    function changeTargetLanguage(targetLanguage: TranslationLanguage): void {
+      if (state.targetLanguage === targetLanguage) {
+        return;
+      }
+
+      state.targetLanguage = targetLanguage;
+
+      /*
+       * 先更新並保存設定。
+       */
+      persistTranslatorSettings();
+
+      const sourceText = state.sourceText.trim();
+
+      if (!sourceText || state.status === "hidden") {
+        return;
+      }
+
+      /*
+       * 不傳入座標，
+       * 保持卡片目前位置。
+       */
+      startTranslation(sourceText);
+    }
+    const unwatchTranslatorSettings = watchTranslatorSettings((settings) => {
+      if (ctx.isInvalid || !isCurrentInstance()) {
+        return;
+      }
+
+      const enabledChanged = state.enabled !== settings.enabled;
+
+      const sourceChanged = state.sourceLanguageSetting !== settings.sourceLanguageSetting;
+
+      const targetChanged = state.targetLanguage !== settings.targetLanguage;
+
+      if (!enabledChanged && !sourceChanged && !targetChanged) {
+        return;
+      }
+
+      const becameDisabled = state.enabled && !settings.enabled;
+
+      state.enabled = settings.enabled;
+
+      state.sourceLanguageSetting = settings.sourceLanguageSetting;
+
+      state.targetLanguage = settings.targetLanguage;
+
+      if (sourceChanged) {
+        state.detectedSourceLanguage = "";
+
+        state.detectedSourceConfidence = null;
+      }
+
+      if (becameDisabled) {
+        hidePopover();
+      }
+
+      console.log("[Instant Translator] 已同步其他分頁的設定", {
+        enabled: settings.enabled,
+
+        sourceLanguageSetting: settings.sourceLanguageSetting,
+
+        targetLanguage: settings.targetLanguage,
+      });
+    });
     /**
      * 處理有效的選取文字。
      */
     const handleSelectedText = (text: string, pointerX: number, pointerY: number): void => {
+      if (!state.enabled) {
+        return;
+      }
+
       startTranslation(text, pointerX, pointerY);
     };
     /*
@@ -1209,19 +1171,15 @@ browser.runtime.onMessage.addListener(
 
       abortActiveTranslation();
 
-      void destroyLanguageDetector()
-        .catch((error: unknown) => {
-          console.debug(
-            '[Instant Translator] 清除 Language Detector 失敗',
-            error,
-          );
-        });
+      void destroyLanguageDetector().catch((error: unknown) => {
+        console.debug("[Instant Translator] 清除 Language Detector 失敗", error);
+      });
 
       translationUi?.remove();
       translationUi = null;
 
       uiMountPromise = null;
-
+      unwatchTranslatorSettings();
       /*
        * 只有目前仍是最新 instance，
        * 才清除 global instance ID。
@@ -1231,12 +1189,8 @@ browser.runtime.onMessage.addListener(
       if (isCurrentInstance()) {
         delete globalScope[GLOBAL_INSTANCE_KEY];
       }
-      void destroyAllTranslatorSessions()
-      .catch((error: unknown) => {
-        console.debug(
-          '[Instant Translator] 清除 Translator session 失敗',
-          error,
-        );
+      void destroyAllTranslatorSessions().catch((error: unknown) => {
+        console.debug("[Instant Translator] 清除 Translator session 失敗", error);
       });
       void stopSpeechInBackground().catch(() => {
         // 擴充功能失效時不再處理錯誤。
@@ -1407,51 +1361,26 @@ function isTranslatorUiEvent(event: Event): boolean {
   });
 }
 
-function getSelectionLanguageHint():
-  string {
-  const selection =
-    window.getSelection();
+function getSelectionLanguageHint(): string {
+  const selection = window.getSelection();
 
-  if (
-    !selection ||
-    selection.rangeCount === 0
-  ) {
-    return (
-      document.documentElement
-        .lang ||
-      ''
-    );
+  if (!selection || selection.rangeCount === 0) {
+    return document.documentElement.lang || "";
   }
 
-  const range =
-    selection.getRangeAt(0);
+  const range = selection.getRangeAt(0);
 
-  const commonAncestor =
-    range.commonAncestorContainer;
+  const commonAncestor = range.commonAncestorContainer;
 
-  const element =
-    commonAncestor instanceof
-      Element
-      ? commonAncestor
-      : commonAncestor.parentElement;
+  const element = commonAncestor instanceof Element ? commonAncestor : commonAncestor.parentElement;
 
-  const languageElement =
-    element?.closest<HTMLElement>(
-      '[lang]',
-    );
+  const languageElement = element?.closest<HTMLElement>("[lang]");
 
-  const nearestLanguage =
-    languageElement
-      ?.getAttribute('lang')
-      ?.trim();
+  const nearestLanguage = languageElement?.getAttribute("lang")?.trim();
 
   if (nearestLanguage) {
     return nearestLanguage;
   }
 
-  return (
-    document.documentElement
-      .lang ||
-    ''
-  );
+  return document.documentElement.lang || "";
 }

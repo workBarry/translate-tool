@@ -9,6 +9,7 @@ export default defineConfig({
     minimum_chrome_version: '138',
 
     permissions: [
+      'storage',
       'tts',
     ],
   },
