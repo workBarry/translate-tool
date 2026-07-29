@@ -15,12 +15,12 @@ export interface NativeTranslationInput {
   /**
    * 網頁宣告的語言，例如 en-US、zh-TW。
    */
-  pageLanguage?: string;
+  sourceLanguage: string;
 
   /**
    * 目前固定翻譯成繁體中文。
    */
-  targetLanguage?: string;
+  targetLanguage: string;
 
   signal: AbortSignal;
 
@@ -139,15 +139,13 @@ if (!('Translator' in self)) {
   input.signal.throwIfAborted();
 
   const sourceLanguage =
-    inferSourceLanguage(
-      normalizedText,
-      input.pageLanguage,
+    normalizeLanguageTag(
+      input.sourceLanguage,
     );
 
   const targetLanguage =
     normalizeLanguageTag(
-      input.targetLanguage ??
-        'zh-Hant',
+      input.targetLanguage,
     );
 
     console.log(
@@ -159,15 +157,11 @@ if (!('Translator' in self)) {
             100,
           ),
 
-        pageLanguage:
-          input.pageLanguage ||
-          '(empty)',
-
         sourceLanguage,
         targetLanguage,
       },
     );
-  if (!targetLanguage) {
+  if (!sourceLanguage || !targetLanguage) {
     return Promise.reject(
       new NativeTranslationError(
         '不支援指定的目標語言',

@@ -4,6 +4,7 @@ import { isSpeechPlaybackEventMessage } from "../src/shared/speech-messages";
 
 import type {
   PopoverPosition,
+  SourceLanguageSetting,
   SpeechTarget,
 } from "./selection/types";
 import { createShadowRootUi, defineContentScript } from "#imports";
@@ -11,6 +12,11 @@ import { createApp, reactive } from "vue";
 import {
   destroyAllTranslatorSessions,
 } from './selection/translator-session-cache';
+import {
+  destroyLanguageDetector,
+  resolveImmediateSourceLanguage,
+  resolveSourceLanguageWithDetector,
+} from './selection/language-detector.service';
 import {
   detectSpeechLanguage,
   speakTextInBackground,
@@ -96,9 +102,11 @@ export default defineContentScript({
       left: 0,
       top: 0,
 
+      sourceLanguageSetting: 'auto',
       targetLanguage: "zh-Hant",
 
       detectedSourceLanguage: "",
+      detectedSourceConfidence: null,
 
       modelStatus: 'idle',
       modelDownloadProgress: 0,
@@ -384,6 +392,8 @@ export default defineContentScript({
 
               onStopSpeech: stopCurrentSpeech,
 
+              onChangeSourceLanguage: changeSourceLanguage,
+
               onChangeTargetLanguage: changeTargetLanguage,
 
               onAdjustPosition: adjustPopoverPosition,
@@ -524,7 +534,7 @@ browser.runtime.onMessage.addListener(
      * 向 Background Service Worker
      * 發送翻譯請求。
      */
-    const startTranslation = (text: string, pointerX?: number, pointerY?: number): void => {
+    const startTranslationLegacy = (text: string, pointerX?: number, pointerY?: number): void => {
       if (!isCurrentInstance()) {
         return;
       }
@@ -582,7 +592,7 @@ browser.runtime.onMessage.addListener(
       const translationPromise = translateWithChrome({
         text,
 
-        pageLanguage,
+        sourceLanguage: 'en',
 
         targetLanguage: state.targetLanguage,
 
@@ -753,6 +763,276 @@ browser.runtime.onMessage.addListener(
       })();
     };
 
+    function startTranslation(
+      text: string,
+      pointerX?: number,
+      pointerY?: number,
+    ): void {
+      if (!isCurrentInstance()) {
+        return;
+      }
+
+      const normalizedText = text.trim();
+
+      if (!normalizedText) {
+        return;
+      }
+
+      abortActiveTranslation();
+
+      const requestId = crypto.randomUUID();
+      latestRequestId = requestId;
+
+      const abortController = new AbortController();
+      activeAbortController = abortController;
+
+      const position =
+        typeof pointerX === 'number' &&
+        typeof pointerY === 'number'
+          ? calculatePopoverPosition(pointerX, pointerY)
+          : {
+              left: state.left,
+              top: state.top,
+            };
+
+      const pageLanguage = getSelectionLanguageHint();
+
+      state.detectedSourceLanguage = '';
+      state.detectedSourceConfidence = null;
+
+      popoverController.showLoading(normalizedText, position);
+
+      void ensureTranslationUiMounted().catch(
+        (error: unknown) => {
+          if (
+            requestId !== latestRequestId ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          popoverController.showError(
+            error instanceof Error
+              ? error.message
+              : '無法建立翻譯卡片',
+          );
+        },
+      );
+
+      const immediateResolution = resolveImmediateSourceLanguage({
+        text: normalizedText,
+        sourceLanguageSetting: state.sourceLanguageSetting,
+        pageLanguage,
+      });
+
+      if (immediateResolution?.language) {
+        state.detectedSourceLanguage = immediateResolution.language;
+        state.detectedSourceConfidence =
+          immediateResolution.confidence;
+
+        beginResolvedTranslation({
+          requestId,
+          text: normalizedText,
+          sourceLanguage: immediateResolution.language,
+          abortController,
+        });
+
+        return;
+      }
+
+      void resolveSourceLanguageWithDetector({
+        text: normalizedText,
+        sourceLanguageSetting: state.sourceLanguageSetting,
+        pageLanguage,
+        onDownloadProgress(percentage) {
+          if (
+            requestId !== latestRequestId ||
+            abortController.signal.aborted ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          console.log(
+            '[Instant Translator] Language Detector 模型下載中',
+            { requestId, percentage },
+          );
+        },
+      })
+        .then((resolution) => {
+          if (
+            requestId !== latestRequestId ||
+            abortController.signal.aborted ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          if (!resolution.language) {
+            popoverController.showError(
+              '無法可靠判斷來源語言，請手動選擇來源語言。',
+            );
+            clearActiveTranslation(abortController);
+            return;
+          }
+
+          state.detectedSourceLanguage = resolution.language;
+          state.detectedSourceConfidence = resolution.confidence;
+
+          beginResolvedTranslation({
+            requestId,
+            text: normalizedText,
+            sourceLanguage: resolution.language,
+            abortController,
+          });
+        })
+        .catch((error: unknown) => {
+          if (
+            requestId !== latestRequestId ||
+            abortController.signal.aborted ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          console.error(
+            '[Instant Translator] Language Detector 失敗',
+            { requestId, error },
+          );
+
+          popoverController.showError(
+            '來源語言偵測失敗，請手動選擇來源語言。',
+          );
+          clearActiveTranslation(abortController);
+        });
+    }
+
+    function beginResolvedTranslation(input: {
+      requestId: string;
+      text: string;
+      sourceLanguage: string;
+      abortController: AbortController;
+    }): void {
+      console.log('[Instant Translator] 開始翻譯', {
+        requestId: input.requestId,
+        sourceLanguage: input.sourceLanguage,
+        targetLanguage: state.targetLanguage,
+        text: input.text.slice(0, 100),
+      });
+
+      const translationPromise = translateWithChrome({
+        text: input.text,
+        sourceLanguage: input.sourceLanguage,
+        targetLanguage: state.targetLanguage,
+        signal: input.abortController.signal,
+        onDownloadProgress(percentage) {
+          if (
+            input.requestId !== latestRequestId ||
+            input.abortController.signal.aborted ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          popoverController.showModelDownloading(percentage);
+        },
+        onPreparing() {
+          if (
+            input.requestId === latestRequestId &&
+            !input.abortController.signal.aborted &&
+            isCurrentInstance()
+          ) {
+            popoverController.showModelPreparing();
+          }
+        },
+        onReady() {
+          if (
+            input.requestId === latestRequestId &&
+            !input.abortController.signal.aborted &&
+            isCurrentInstance()
+          ) {
+            popoverController.showModelReady();
+          }
+        },
+      });
+
+      void translationPromise
+        .then((result) => {
+          if (
+            input.requestId !== latestRequestId ||
+            input.abortController.signal.aborted ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          state.detectedSourceLanguage = result.sourceLanguage;
+          popoverController.showSuccess(result.translatedText);
+
+          console.log('[Instant Translator] 翻譯完成', {
+            requestId: input.requestId,
+            sourceLanguage: result.sourceLanguage,
+            targetLanguage: result.targetLanguage,
+          });
+        })
+        .catch((error: unknown) => {
+          if (isAbortError(error)) {
+            return;
+          }
+
+          if (
+            input.requestId !== latestRequestId ||
+            !isCurrentInstance()
+          ) {
+            return;
+          }
+
+          console.error('[Instant Translator] 翻譯失敗', {
+            requestId: input.requestId,
+            error,
+          });
+
+          popoverController.showError(
+            error instanceof Error
+              ? error.message
+              : '翻譯發生未知錯誤',
+          );
+        })
+        .finally(() => {
+          clearActiveTranslation(input.abortController);
+        });
+    }
+
+    function clearActiveTranslation(
+      abortController: AbortController,
+    ): void {
+      if (activeAbortController === abortController) {
+        activeAbortController = null;
+      }
+    }
+
+    function changeSourceLanguage(
+      sourceLanguageSetting: SourceLanguageSetting,
+    ): void {
+      if (
+        state.sourceLanguageSetting === sourceLanguageSetting
+      ) {
+        return;
+      }
+
+      state.sourceLanguageSetting = sourceLanguageSetting;
+      state.detectedSourceLanguage = '';
+      state.detectedSourceConfidence = null;
+
+      const text = state.sourceText.trim();
+
+      if (!text || state.status === 'hidden') {
+        return;
+      }
+
+      startTranslation(text);
+    }
+
     const changeTargetLanguage = (targetLanguage: TranslationLanguage): void => {
       if (state.targetLanguage === targetLanguage) {
         return;
@@ -775,10 +1055,8 @@ browser.runtime.onMessage.addListener(
     /**
      * 處理有效的選取文字。
      */
-    const handleSelectedText = async (text: string, pointerX: number, pointerY: number): Promise<void> => {
-      await ensureTranslationUiMounted();
-
-      await startTranslation(text, pointerX, pointerY);
+    const handleSelectedText = (text: string, pointerX: number, pointerY: number): void => {
+      startTranslation(text, pointerX, pointerY);
     };
     /*
      * 使用者放開滑鼠後，
@@ -930,6 +1208,14 @@ browser.runtime.onMessage.addListener(
       latestRequestId = null;
 
       abortActiveTranslation();
+
+      void destroyLanguageDetector()
+        .catch((error: unknown) => {
+          console.debug(
+            '[Instant Translator] 清除 Language Detector 失敗',
+            error,
+          );
+        });
 
       translationUi?.remove();
       translationUi = null;
