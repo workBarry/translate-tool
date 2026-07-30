@@ -25,6 +25,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'close'): void;
+  (event: 'retry'): void;
   (event: 'speak-source'): void;
   (event: 'speak-translation'): void;
   (
@@ -145,6 +146,10 @@ function handleTargetLanguageChange(event: Event): void {
   );
 }
 
+function handleRetry(): void {
+  emit('retry');
+}
+
 function schedulePositionCorrection(): void {
   if (props.state.status === 'hidden') {
     return;
@@ -206,6 +211,8 @@ watch(
     props.state.sourceText,
     props.state.translatedText,
     props.state.errorMessage,
+    props.state.errorCode,
+    props.state.canRetry,
     props.state.speechErrorMessage,
     props.state.modelStatus,
     props.state.modelDownloadProgress,
@@ -367,9 +374,44 @@ onBeforeUnmount(() => {
             v-else-if="state.status === 'error'"
             class="translation-card__error"
             role="alert"
+            :data-error-code="state.errorCode ?? undefined"
           >
-            <strong>翻譯失敗</strong>
-            <span>{{ state.errorMessage }}</span>
+            <div
+              class="translation-card__error-icon"
+              aria-hidden="true"
+            >
+              !
+            </div>
+
+            <div class="translation-card__error-content">
+              <p class="translation-card__error-title">翻譯失敗</p>
+              <p class="translation-card__error-message">
+                {{ state.errorMessage }}
+              </p>
+
+              <button
+                v-if="state.canRetry"
+                class="translation-card__retry-button"
+                type="button"
+                @click.stop="handleRetry"
+              >
+                重新翻譯
+              </button>
+
+              <p
+                v-else-if="state.errorCode === 'LANGUAGE_AMBIGUOUS'"
+                class="translation-card__error-hint"
+              >
+                請使用上方的來源語言選單指定語言。
+              </p>
+
+              <p
+                v-else-if="state.errorCode === 'LANGUAGE_PAIR_UNAVAILABLE'"
+                class="translation-card__error-hint"
+              >
+                請更換來源語言或目標語言。
+              </p>
+            </div>
           </div>
         </section>
 
@@ -385,7 +427,7 @@ onBeforeUnmount(() => {
       <footer class="translation-card__footer">
         <span v-if="state.status === 'loading'">正在使用 Chrome 內建翻譯</span>
         <span v-else-if="state.status === 'success'">Chrome 內建翻譯結果</span>
-        <span v-else-if="state.status === 'error'">請重新選取文字再試一次</span>
+        <span v-else-if="state.status === 'error'">可調整語言設定後重新翻譯</span>
       </footer>
     </section>
   </Transition>

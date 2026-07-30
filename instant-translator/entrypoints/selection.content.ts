@@ -31,6 +31,11 @@ import { PopoverController } from "./selection/popover-controller";
 import { calculatePopoverPosition } from "./selection/position-calculator";
 import { getTextSelection } from "./selection/selection-detector";
 import { translateWithChrome } from "./selection/native-translation.provider";
+import {
+  createTranslationError,
+  isAbortError,
+  normalizeTranslationError,
+} from "./selection/translation-error";
 import "./selection/style.css";
 
 import type { TranslationPopoverState } from "./selection/types";
@@ -116,6 +121,8 @@ export default defineContentScript({
       sourceText: "",
       translatedText: "",
       errorMessage: "",
+      errorCode: null,
+      canRetry: false,
 
       left: 0,
       top: 0,
@@ -390,6 +397,8 @@ export default defineContentScript({
 
               onClose: hidePopover,
 
+              onRetry: retryTranslation,
+
               onSpeakSource: speakSourceText,
 
               onSpeakTranslation: speakTranslatedText,
@@ -540,7 +549,6 @@ export default defineContentScript({
 
       console.log("[Instant Translator] 準備呼叫 translateWithChrome", {
         requestId,
-        text,
         pageLanguage,
         targetLanguage: state.targetLanguage,
       });
@@ -622,7 +630,8 @@ export default defineContentScript({
 
           console.log("[Instant Translator] translateWithChrome Promise 已完成", {
             requestId,
-            result,
+            sourceLanguage: result.sourceLanguage,
+            targetLanguage: result.targetLanguage,
           });
 
           if (requestId !== latestRequestId) {
@@ -653,9 +662,6 @@ export default defineContentScript({
 
             targetLanguage: result.targetLanguage,
 
-            originalText: result.originalText,
-
-            translatedText: result.translatedText,
           });
         } catch (error: unknown) {
           console.error("[Instant Translator] translateWithChrome Promise 失敗", {
@@ -685,7 +691,9 @@ export default defineContentScript({
             error,
           });
 
-          popoverController.showError(error instanceof Error ? error.message : "翻譯發生未知錯誤");
+          popoverController.showError(
+            normalizeTranslationError(error, "translate"),
+          );
         } finally {
           if (activeAbortController === abortController) {
             activeAbortController = null;
@@ -693,6 +701,20 @@ export default defineContentScript({
         }
       })();
     };
+
+    function retryTranslation(): void {
+      if (!state.enabled || state.status !== "error" || !state.canRetry) {
+        return;
+      }
+
+      const sourceText = state.sourceText.trim();
+
+      if (!sourceText) {
+        return;
+      }
+
+      startTranslation(sourceText);
+    }
 
     function startTranslation(text: string, pointerX?: number, pointerY?: number): void {
       if (!state.enabled || ctx.isInvalid || !isCurrentInstance()) {
@@ -733,7 +755,9 @@ export default defineContentScript({
           return;
         }
 
-        popoverController.showError(error instanceof Error ? error.message : "無法建立翻譯卡片");
+        popoverController.showError(
+          normalizeTranslationError(error),
+        );
       });
 
       const immediateResolution = resolveImmediateSourceLanguage({
@@ -774,7 +798,9 @@ export default defineContentScript({
           }
 
           if (!resolution.language) {
-            popoverController.showError("無法可靠判斷來源語言，請手動選擇來源語言。");
+            popoverController.showError(
+              createTranslationError("LANGUAGE_AMBIGUOUS"),
+            );
             clearActiveTranslation(abortController);
             return;
           }
@@ -794,9 +820,19 @@ export default defineContentScript({
             return;
           }
 
-          console.error("[Instant Translator] Language Detector 失敗", { requestId, error });
+          const normalizedError = normalizeTranslationError(error, "detect");
 
-          popoverController.showError("來源語言偵測失敗，請手動選擇來源語言。");
+          if (isAbortError(normalizedError)) {
+            return;
+          }
+
+          console.error("[Instant Translator] 來源語言偵測失敗", {
+            requestId,
+            code: normalizedError.code,
+            errorName: error instanceof Error ? error.name : typeof error,
+          });
+
+          popoverController.showError(normalizedError);
           clearActiveTranslation(abortController);
         });
     }
@@ -811,7 +847,6 @@ export default defineContentScript({
         requestId: input.requestId,
         sourceLanguage: input.sourceLanguage,
         targetLanguage: state.targetLanguage,
-        text: input.text.slice(0, 100),
       });
 
       const translationPromise = translateWithChrome({
@@ -870,7 +905,12 @@ export default defineContentScript({
           });
         })
         .catch((error: unknown) => {
-          if (isAbortError(error)) {
+          const normalizedError = normalizeTranslationError(error, "translate");
+
+          if (isAbortError(normalizedError)) {
+            console.debug("[Instant Translator] 翻譯已取消", {
+              requestId: input.requestId,
+            });
             return;
           }
 
@@ -880,10 +920,13 @@ export default defineContentScript({
 
           console.error("[Instant Translator] 翻譯失敗", {
             requestId: input.requestId,
-            error,
+            code: normalizedError.code,
+            sourceLanguage: input.sourceLanguage,
+            targetLanguage: state.targetLanguage,
+            errorName: error instanceof Error ? error.name : typeof error,
           });
 
-          popoverController.showError(error instanceof Error ? error.message : "翻譯發生未知錯誤");
+          popoverController.showError(normalizedError);
         })
         .finally(() => {
           clearActiveTranslation(input.abortController);
@@ -1013,12 +1056,12 @@ export default defineContentScript({
     /**
      * 處理有效的選取文字。
      */
-    const handleSelectedText = (text: string, pointerX: number, pointerY: number): void => {
+    const handleSelectedText = (selectedText: string, pointerX: number, pointerY: number): void => {
       if (!state.enabled) {
         return;
       }
 
-      startTranslation(text, pointerX, pointerY);
+      startTranslation(selectedText, pointerX, pointerY);
     };
     /*
      * 使用者放開滑鼠後，
@@ -1047,13 +1090,21 @@ export default defineContentScript({
           return;
         }
 
-        const selectedContent = getTextSelection(event);
-
-        if (!selectedContent) {
+        if (event.button !== 0) {
           return;
         }
 
-        handleSelectedText(selectedContent.text, selectedContent.pointerX, selectedContent.pointerY);
+        const selection = getTextSelection(event);
+
+        if (!selection) {
+          return;
+        }
+
+        handleSelectedText(
+          selection.text,
+          selection.pointerX,
+          selection.pointerY,
+        );
       },
       {
         capture: true,
@@ -1082,28 +1133,6 @@ export default defineContentScript({
 
       hidePopover();
     });
-
-    /*
-     * Escape 關閉卡片。
-     */
-    ctx.addEventListener(
-      document,
-      "keydown",
-      (event) => {
-        if (!isCurrentInstance()) {
-          return;
-        }
-
-        if (event.key !== "Escape") {
-          return;
-        }
-
-        hidePopover();
-      },
-      {
-        capture: true,
-      },
-    );
 
     /*
      * 網頁捲動時關閉卡片。
@@ -1341,10 +1370,6 @@ function applyImportantStyles(element: HTMLElement, styles: Record<string, strin
   for (const [property, value] of Object.entries(styles)) {
     element.style.setProperty(property, value, "important");
   }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function isTranslatorUiEvent(event: Event): boolean {

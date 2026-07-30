@@ -1,9 +1,21 @@
+import {
+  browser,
+} from 'wxt/browser';
+
 import type {
   SourceLanguageSetting,
 } from './types';
+import {
+  logTranslationError,
+} from './translation-error';
 
-const MINIMUM_CONFIDENCE = 0.72;
-const MINIMUM_CONFIDENCE_GAP = 0.12;
+const SUPPORTED_SOURCE_LANGUAGES = new Set([
+  'zh',
+  'zh-Hant',
+  'en',
+  'ja',
+  'ko',
+]);
 
 type LanguageDetectorSession = Awaited<
   ReturnType<typeof LanguageDetector.create>
@@ -17,6 +29,7 @@ export interface SourceLanguageResolution {
     | 'script'
     | 'page-language'
     | 'language-detector'
+    | 'chrome-i18n'
     | 'ambiguous';
 }
 
@@ -101,52 +114,159 @@ export async function resolveSourceLanguageWithDetector(
 
   const text = input.text.trim();
 
-  if (!text || !('LanguageDetector' in self)) {
+  if (!text) {
     return ambiguousResolution();
   }
 
-  const detector = await getLanguageDetectorSession(
-    input.onDownloadProgress,
+  const pageLanguage = normalizeLanguageCode(
+    input.pageLanguage ?? '',
+  );
+  const compactText = text.replace(/\s+/gu, '');
+  const textLength = Array.from(compactText).length;
+  const containsHan = /[\u3400-\u9fff\uf900-\ufaff]/u.test(text);
+
+  if ('LanguageDetector' in self) {
+    try {
+      const detector = await getLanguageDetectorSession(
+        input.onDownloadProgress,
+      );
+
+      const candidates = mergeNormalizedCandidates(
+        await detector.detect(text),
+      );
+
+      return resolveBuiltInDetectorResult({
+        candidates,
+        textLength,
+        pageLanguage,
+        containsHan,
+      });
+    } catch (error: unknown) {
+      logTranslationError(
+        'Built-In Language Detector 無法使用，改用 Chrome i18n 備援',
+        error,
+      );
+    }
+  }
+
+  const fallbackResult = await detectWithChromeI18n(text);
+
+  if (fallbackResult.language) {
+    return fallbackResult;
+  }
+
+  return resolvePageLanguageFallback({
+    pageLanguage,
+    containsHan,
+  });
+}
+
+function resolveBuiltInDetectorResult(input: {
+  candidates: Array<{
+    detectedLanguage: string;
+    confidence: number;
+  }>;
+  textLength: number;
+  pageLanguage: string;
+  containsHan: boolean;
+}): SourceLanguageResolution {
+  const supportedCandidates = input.candidates.filter(
+    (candidate) => SUPPORTED_SOURCE_LANGUAGES.has(
+      candidate.detectedLanguage,
+    ),
   );
 
-  const candidates = mergeNormalizedCandidates(
-    await detector.detect(text),
-  );
+  const first = supportedCandidates.at(0);
+  const second = supportedCandidates.at(1);
+
+  if (!first) {
+    return resolvePageLanguageFallback({
+      pageLanguage: input.pageLanguage,
+      containsHan: input.containsHan,
+    });
+  }
+
+  const minimumConfidence =
+    input.textLength >= 20
+      ? 0.5
+      : input.textLength >= 8
+        ? 0.4
+        : 0.3;
+
+  const minimumGap = input.textLength >= 8 ? 0.08 : 0.04;
+  const confidenceGap = first.confidence - (second?.confidence ?? 0);
 
   console.log(
-    '[Instant Translator] Language Detector 結果',
+    '[Instant Translator] 語言偵測判定',
     {
-      text: text.slice(0, 100),
-      candidates: candidates.slice(0, 5),
+      textLength: input.textLength,
+      pageLanguage: input.pageLanguage || '(empty)',
+      first,
+      second,
+      minimumConfidence,
+      minimumGap,
+      confidenceGap,
     },
   );
 
-  const first = candidates.at(0);
-  const second = candidates.at(1);
-
-  if (!first) {
-    return ambiguousResolution();
-  }
-
-  const confidenceGap =
-    first.confidence - (second?.confidence ?? 0);
-
   if (
-    first.confidence < MINIMUM_CONFIDENCE ||
-    confidenceGap < MINIMUM_CONFIDENCE_GAP
+    first.confidence >= minimumConfidence &&
+    confidenceGap >= minimumGap
   ) {
     return {
-      language: null,
+      language: first.detectedLanguage,
       confidence: first.confidence,
-      method: 'ambiguous',
+      method: 'language-detector',
     };
   }
 
-  return {
-    language: first.detectedLanguage,
-    confidence: first.confidence,
-    method: 'language-detector',
-  };
+  const pageFallback = resolvePageLanguageFallback({
+    pageLanguage: input.pageLanguage,
+    containsHan: input.containsHan,
+  });
+
+  return pageFallback.language
+    ? pageFallback
+    : {
+        language: null,
+        confidence: first.confidence,
+        method: 'ambiguous',
+      };
+}
+
+async function detectWithChromeI18n(
+  text: string,
+): Promise<SourceLanguageResolution> {
+  try {
+    const result = await browser.i18n.detectLanguage(text);
+
+    const firstSupported = result.languages
+      .map((candidate) => ({
+        language: normalizeLanguageCode(candidate.language),
+        confidence: candidate.percentage / 100,
+      }))
+      .filter(
+        (candidate) =>
+          candidate.language !== 'und' &&
+          SUPPORTED_SOURCE_LANGUAGES.has(candidate.language),
+      )
+      .sort((first, second) => second.confidence - first.confidence)
+      .at(0);
+
+    if (!firstSupported) {
+      return ambiguousResolution();
+    }
+
+    return {
+      language: firstSupported.language,
+      confidence: firstSupported.confidence,
+      method: 'chrome-i18n',
+    };
+  } catch (error: unknown) {
+    logTranslationError('Chrome i18n 語言偵測失敗', error);
+
+    return ambiguousResolution();
+  }
 }
 
 export async function destroyLanguageDetector(): Promise<void> {
@@ -264,6 +384,39 @@ function ambiguousResolution(): SourceLanguageResolution {
   };
 }
 
+interface ResolvePageLanguageFallbackInput {
+  pageLanguage: string;
+  containsHan: boolean;
+}
+
+function resolvePageLanguageFallback(
+  input: ResolvePageLanguageFallbackInput,
+): SourceLanguageResolution {
+  const {
+    pageLanguage,
+    containsHan,
+  } = input;
+
+  if (!SUPPORTED_SOURCE_LANGUAGES.has(pageLanguage)) {
+    return ambiguousResolution();
+  }
+
+  if (
+    containsHan &&
+    pageLanguage !== 'ja' &&
+    pageLanguage !== 'zh' &&
+    pageLanguage !== 'zh-Hant'
+  ) {
+    return ambiguousResolution();
+  }
+
+  return {
+    language: pageLanguage,
+    confidence: null,
+    method: 'page-language',
+  };
+}
+
 export function normalizeLanguageCode(language: string): string {
   const normalized = language
     .trim()
@@ -278,7 +431,8 @@ export function normalizeLanguageCode(language: string): string {
     normalized === 'zh-hant' ||
     normalized === 'zh-tw' ||
     normalized === 'zh-hk' ||
-    normalized === 'zh-mo'
+    normalized === 'zh-mo' ||
+    normalized.startsWith('zh-hant-')
   ) {
     return 'zh-Hant';
   }
@@ -287,7 +441,8 @@ export function normalizeLanguageCode(language: string): string {
     normalized === 'zh-hans' ||
     normalized === 'zh-cn' ||
     normalized === 'zh-sg' ||
-    normalized === 'zh'
+    normalized === 'zh' ||
+    normalized.startsWith('zh-hans-')
   ) {
     return 'zh';
   }

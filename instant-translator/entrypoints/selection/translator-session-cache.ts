@@ -173,9 +173,9 @@ export function getTranslatorSession(
          * 建立失敗後移除快取，
          * 下一次才允許重新嘗試。
          */
-        sessionEntries.delete(
-          key,
-        );
+        if (sessionEntries.get(key) === entry) {
+          sessionEntries.delete(key);
+        }
 
         console.error(
           '[Instant Translator] Translator session 建立失敗',
@@ -202,6 +202,36 @@ export function getTranslatorSession(
   );
 
   return sessionPromise;
+}
+
+/**
+ * 移除指定語言組合的快取 Session。
+ *
+ * 只在 translate() 實際失敗後使用；一般取消、關閉卡片和切換語言
+ * 都不應破壞可共用的 Translator Session。
+ */
+export async function invalidateTranslatorSession(
+  sourceLanguage: string,
+  targetLanguage: string,
+): Promise<void> {
+  const key = createSessionKey(sourceLanguage, targetLanguage);
+  const entry = sessionEntries.get(key);
+
+  sessionEntries.delete(key);
+
+  if (!entry?.promise) {
+    return;
+  }
+
+  const [result] = await Promise.allSettled([entry.promise]);
+
+  if (result?.status === 'fulfilled') {
+    try {
+      result.value.destroy();
+    } catch {
+      // Session 可能已由 Chrome 失效或銷毀。
+    }
+  }
 }
 
 export async function destroyAllTranslatorSessions():

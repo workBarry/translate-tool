@@ -3,6 +3,9 @@ import type {
   SpeechTarget,
   TranslationPopoverState,
 } from './types';
+import type {
+  InstantTranslationError,
+} from './translation-error';
 
 export class PopoverController {
   constructor(
@@ -19,6 +22,8 @@ export class PopoverController {
 
     this.state.translatedText = '';
     this.state.errorMessage = '';
+    this.state.errorCode = null;
+    this.state.canRetry = false;
 
     this.state.left =
       position.left;
@@ -74,17 +79,25 @@ export class PopoverController {
       translatedText;
 
     this.state.errorMessage = '';
+    this.state.errorCode = null;
+    this.state.canRetry = false;
     this.state.status =
       'success';
   }
 
   showError(
-    message: string,
+    error: InstantTranslationError,
   ): void {
     this.state.translatedText = '';
 
     this.state.errorMessage =
-      message;
+      error.message;
+
+    this.state.errorCode =
+      error.code;
+
+    this.state.canRetry =
+      error.retryable;
 
     this.state.status =
       'error';
@@ -155,6 +168,10 @@ resetSpeechState(): void {
 }
   hide(): void {
     this.resetSpeechState();
+
+    this.state.errorMessage = '';
+    this.state.errorCode = null;
+    this.state.canRetry = false;
 
     this.state.status =
       'hidden';

@@ -2,7 +2,9 @@ import type {
   SourceLanguageSetting,
   TranslationLanguage,
 } from '../../src/shared/translator-settings.types';
-
+import type {
+  TranslationErrorCode,
+} from './translation-error';
 export type {
   SourceLanguageSetting,
   TranslationLanguage,
@@ -33,6 +35,8 @@ export interface TranslationPopoverState {
   sourceText: string;
   translatedText: string;
   errorMessage: string;
+  errorCode: TranslationErrorCode | null;
+  canRetry: boolean;
 
   left: number;
   top: number;
