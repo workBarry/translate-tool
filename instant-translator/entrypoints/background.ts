@@ -38,6 +38,22 @@ export default defineBackground(() => {
 
   registerSpeechMessageHandler();
 
+  browser.runtime.onInstalled.addListener((details) => {
+    if (details.reason !== 'install') {
+      return;
+    }
+
+    void browser.runtime.openOptionsPage().catch((error: unknown) => {
+      errorLog(
+        '[Instant Translator Background] 無法開啟離線模型設定',
+        error,
+        {
+          code: 'OPEN_OPTIONS_FAILED',
+        },
+      );
+    });
+  });
+
   const activeRequests =
     new Map<string, AbortController>();
 

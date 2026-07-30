@@ -3,6 +3,9 @@ import {
   errorLog,
 } from "../../src/shared/logger";
 
+import {
+  browser,
+} from 'wxt/browser';
 
 import {
   computed,
@@ -311,6 +314,26 @@ async function handleReset():
     );
   } finally {
     resetting.value = false;
+  }
+}
+
+async function openModelSetup():
+  Promise<void> {
+  try {
+    await browser.runtime.openOptionsPage();
+  } catch (error: unknown) {
+    errorLog(
+      '[Instant Translator] 開啟離線模型設定失敗',
+      error,
+      {
+        code: 'OPEN_OPTIONS_FAILED',
+      },
+    );
+
+    showStatus(
+      'error',
+      '無法開啟離線模型設定',
+    );
   }
 }
 
@@ -652,23 +675,33 @@ function getTargetLanguageLabel(
       <footer
         class="popup__footer"
       >
-        <button
-          class="button button--secondary"
-          type="button"
-          :disabled="
-            resetting ||
-            saving
-          "
-          @click="
-            handleReset
-          "
-        >
-          {{
-            resetting
-              ? '重設中……'
-              : '恢復預設值'
-          }}
-        </button>
+        <div class="popup__footer-actions">
+          <button
+            class="button button--secondary"
+            type="button"
+            @click="openModelSetup"
+          >
+            準備離線模型
+          </button>
+
+          <button
+            class="button button--secondary"
+            type="button"
+            :disabled="
+              resetting ||
+              saving
+            "
+            @click="
+              handleReset
+            "
+          >
+            {{
+              resetting
+                ? '重設中……'
+                : '恢復預設值'
+            }}
+          </button>
+        </div>
 
         <p
           class="popup__save-status"

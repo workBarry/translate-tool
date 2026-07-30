@@ -364,6 +364,12 @@ input:focus-visible {
   margin-top: 14px;
 }
 
+.popup__footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .button {
   min-height: 34px;
   padding: 7px 11px;

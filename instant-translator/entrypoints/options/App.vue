@@ -1,255 +1,271 @@
 <script setup lang="ts">
 import {
-  errorLog,
-} from "../../src/shared/logger";
-
-
-import {
+  computed,
   ref,
 } from 'vue';
 
-interface LanguagePair {
-  sourceLanguage: string;
-  targetLanguage: string;
-  label: string;
-}
+import {
+  errorLog,
+} from '../../src/shared/logger';
+import {
+  createPairKey,
+  preloadRecommendedModels,
+} from '../../src/shared/model-preloader';
 
-const COMMON_LANGUAGE_PAIRS:
-  LanguagePair[] = [
-    {
-      sourceLanguage: 'en',
-      targetLanguage:
-        'zh-Hant',
-      label:
-        '英文 → 繁體中文',
-    },
-    {
-      sourceLanguage:
-        'zh-Hant',
-      targetLanguage: 'en',
-      label:
-        '繁體中文 → 英文',
-    },
-    {
-      sourceLanguage: 'ja',
-      targetLanguage:
-        'zh-Hant',
-      label:
-        '日文 → 繁體中文',
-    },
-    {
-      sourceLanguage:
-        'zh-Hant',
-      targetLanguage: 'ja',
-      label:
-        '繁體中文 → 日文',
-    },
-    {
-      sourceLanguage: 'ko',
-      targetLanguage:
-        'zh-Hant',
-      label:
-        '韓文 → 繁體中文',
-    },
-  ];
+import type {
+  ModelPreloadProgress,
+  ModelPreloadResult,
+  TranslationPair,
+} from '../../src/shared/model-preloader';
 
-const status =
-  ref<
-    'idle' |
-    'downloading' |
-    'completed' |
-    'error'
-  >('idle');
+const RECOMMENDED_PAIRS = [
+  {
+    sourceLanguage: 'en',
+    targetLanguage: 'zh-Hant',
+  },
+  {
+    sourceLanguage: 'ja',
+    targetLanguage: 'zh-Hant',
+  },
+  {
+    sourceLanguage: 'ko',
+    targetLanguage: 'zh-Hant',
+  },
+] satisfies TranslationPair[];
 
-const currentLabel =
-  ref('');
+const isPreparing = ref(false);
+const progress = ref<ModelPreloadProgress | null>(null);
+const results = ref<ModelPreloadResult[]>([]);
+const errorMessage = ref('');
 
-const progress =
-  ref(0);
+const completedCount = computed(() =>
+  results.value.filter((result) => result.status === 'completed').length,
+);
 
-const errorMessage =
-  ref('');
+const failedCount = computed(() =>
+  results.value.filter((result) => result.status === 'failed').length,
+);
 
-async function prepareCommonLanguages():
-  Promise<void> {
-  if (!('Translator' in self)) {
-    status.value =
-      'error';
+const skippedCount = computed(() =>
+  results.value.filter((result) => result.status === 'skipped').length,
+);
 
-    errorMessage.value =
-      '目前 Chrome 不支援 Translator API';
+const failedTaskIds = computed(() =>
+  new Set(
+    results.value
+      .filter((result) => result.status === 'failed')
+      .map((result) => result.taskId),
+  ),
+);
 
+const prepareButtonLabel = computed(() => {
+  if (isPreparing.value) {
+    return '模型準備中……';
+  }
+
+  if (failedCount.value > 0) {
+    return '重試失敗項目';
+  }
+
+  return results.value.length > 0
+    ? '重新檢查模型'
+    : '下載常用模型';
+});
+
+async function handlePrepareModels(): Promise<void> {
+  if (isPreparing.value) {
     return;
   }
 
-  status.value =
-    'downloading';
+  const isFirstPreparation = results.value.length === 0;
+  const previousResults = results.value;
+  const retryOnlyFailedTasks =
+    !isFirstPreparation && failedTaskIds.value.size > 0;
 
-  errorMessage.value =
-    '';
+  const translationPairs = retryOnlyFailedTasks
+    ? RECOMMENDED_PAIRS.filter((pair) =>
+        failedTaskIds.value.has(createPairKey(pair)),
+      )
+    : RECOMMENDED_PAIRS;
+
+  const includeLanguageDetector =
+    isFirstPreparation ||
+    failedTaskIds.value.has('language-detector');
+
+  isPreparing.value = true;
+  progress.value = null;
+  errorMessage.value = '';
 
   try {
     /*
-     * 在同一次按鈕點擊中，
-     * 立即呼叫每一組 Translator.create()。
-     *
-     * 不要在建立第一組之前先 await。
+     * 此函式僅由按鈕 click handler 呼叫。
+     * 呼叫前不可加入 setTimeout 或其他非使用者互動的流程。
      */
-    const createJobs =
-      COMMON_LANGUAGE_PAIRS.map(
-        (pair) => {
-          return {
-            pair,
+    const newResults = await preloadRecommendedModels({
+      includeLanguageDetector,
+      translationPairs,
+      onProgress(newProgress) {
+        progress.value = newProgress;
+      },
+    });
 
-            promise:
-              Translator.create({
-                sourceLanguage:
-                  pair.sourceLanguage,
-
-                targetLanguage:
-                  pair.targetLanguage,
-
-                monitor(monitor) {
-                  monitor.addEventListener(
-                    'downloadprogress',
-                    (event) => {
-                      currentLabel.value =
-                        pair.label;
-
-                      progress.value =
-                        Math.round(
-                          event.loaded *
-                            100,
-                        );
-                    },
-                  );
-                },
-              }),
-          };
-        },
-      );
-
-    const results =
-      await Promise.allSettled(
-        createJobs.map(
-          (job) =>
-            job.promise,
-        ),
-      );
-
-    const failedResult =
-      results.find(
-        (result) =>
-          result.status ===
-          'rejected',
-      );
-
-    /*
-     * 預下載完成後不需要持續占用 session。
-     * 語言包會由 Chrome 管理。
-     */
-    for (const result of results) {
-      if (
-        result.status ===
-        'fulfilled'
-      ) {
-        result.value.destroy();
-      }
-    }
-
-    if (
-      failedResult?.status ===
-      'rejected'
-    ) {
-      throw failedResult.reason;
-    }
-
-    progress.value = 100;
-
-    status.value =
-      'completed';
-  } catch (error: unknown) {
-    errorLog(
-      '[Instant Translator] 常用語言準備失敗',
-      error,
+    const refreshedTaskIds = new Set(
+      newResults.map((result) => result.taskId),
     );
 
-    status.value =
-      'error';
+    results.value = [
+      ...previousResults.filter(
+        (result) => !refreshedTaskIds.has(result.taskId),
+      ),
+      ...newResults,
+    ];
+  } catch (error: unknown) {
+    errorLog('[Instant Translator] 準備離線模型失敗', error, {
+      code: 'MODEL_PRELOAD_START_FAILED',
+    });
 
     errorMessage.value =
       error instanceof Error
         ? error.message
-        : '語言模型下載失敗';
+        : '模型準備失敗。';
+  } finally {
+    isPreparing.value = false;
   }
 }
 </script>
 
 <template>
-  <main>
-    <h1>
-      即時翻譯設定
-    </h1>
-
-    <p>
-      第一次使用前，可先準備常用翻譯語言。
-    </p>
-
-    <button
-      type="button"
-      :disabled="
-        status ===
-        'downloading'
-      "
-      @click="
-        prepareCommonLanguages
-      "
-    >
-      {{
-        status ===
-        'downloading'
-          ? '正在準備……'
-          : '準備常用語言'
-      }}
-    </button>
-
-    <div
-      v-if="
-        status ===
-        'downloading'
-      "
-    >
-      <p>
-        {{ currentLabel }}
+  <main
+    class="model-setup"
+    aria-labelledby="model-setup-title"
+  >
+    <header class="model-setup__header">
+      <p class="model-setup__eyebrow">
+        Instant Translator
       </p>
 
+      <h1 id="model-setup-title">
+        準備離線翻譯模型
+      </h1>
+
+      <p>
+        下載常用模型後，第一次選字翻譯就不需要等待完整下載。
+      </p>
+    </header>
+
+    <section
+      class="model-setup__card"
+      aria-labelledby="recommended-models-title"
+    >
+      <h2 id="recommended-models-title">
+        將準備的模型
+      </h2>
+
+      <ul class="model-setup__list">
+        <li>語言偵測模型</li>
+        <li>英文 → 繁體中文</li>
+        <li>日文 → 繁體中文</li>
+        <li>韓文 → 繁體中文</li>
+      </ul>
+
+      <button
+        class="model-setup__button"
+        type="button"
+        :disabled="isPreparing"
+        @click="handlePrepareModels"
+      >
+        {{ prepareButtonLabel }}
+      </button>
+    </section>
+
+    <section
+      v-if="progress"
+      class="model-setup__progress"
+      aria-live="polite"
+    >
+      <div class="model-setup__progress-heading">
+        <strong>{{ progress.taskLabel }}</strong>
+        <span>
+          第 {{ progress.taskIndex }} / {{ progress.taskCount }} 項
+        </span>
+      </div>
+
       <progress
-        :value="progress"
+        :value="progress.overallPercentage"
         max="100"
       />
 
-      <span>
-        {{ progress }}%
-      </span>
-    </div>
+      <p>
+        {{ progress.overallPercentage }}%
+        <span v-if="progress.status === 'checking'">
+          · 正在確認模型狀態
+        </span>
+        <span v-else-if="progress.status === 'downloading'">
+          · 正在下載
+        </span>
+        <span v-else-if="progress.status === 'completed'">
+          · 已完成
+        </span>
+      </p>
+    </section>
+
+    <template v-if="!isPreparing && results.length > 0">
+      <ul class="model-result-list">
+        <li
+          v-for="result in results"
+          :key="result.taskId"
+          class="model-result-item"
+        >
+          <div>
+            <strong>{{ result.taskLabel }}</strong>
+            <small v-if="result.reason">
+              {{ result.reason }}
+            </small>
+          </div>
+
+          <span
+            class="model-result-item__status"
+            :class="`model-result-item__status--${result.status}`"
+          >
+            {{
+              result.status === 'completed'
+                ? '已完成'
+                : result.status === 'skipped'
+                  ? '不需要'
+                  : '失敗'
+            }}
+          </span>
+        </li>
+      </ul>
+
+      <p
+        class="model-setup__summary"
+        aria-live="polite"
+      >
+        已完成 {{ completedCount }} 項
+        <template v-if="skippedCount > 0">
+          ，略過 {{ skippedCount }} 項
+        </template>
+        <template v-if="failedCount > 0">
+          ，失敗 {{ failedCount }} 項
+        </template>
+        。
+        <span v-if="failedCount > 0">
+          可再次按下載按鈕重試失敗項目。
+        </span>
+      </p>
+    </template>
 
     <p
-      v-if="
-        status ===
-        'completed'
-      "
-    >
-      常用語言已準備完成
-    </p>
-
-    <p
-      v-if="
-        status ===
-        'error'
-      "
+      v-if="errorMessage"
+      class="model-setup__error"
       role="alert"
     >
       {{ errorMessage }}
+    </p>
+
+    <p class="model-setup__note">
+      模型由 Chrome 管理；若系統日後釋出磁碟空間，Chrome 可能需要在下次翻譯時重新下載。
     </p>
   </main>
 </template>
