@@ -141,8 +141,27 @@ button:focus-visible {
   cursor: pointer;
 }
 
+.model-setup__actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.model-setup__actions .model-setup__button {
+  width: 100%;
+}
+
 .model-setup__button:hover:not(:disabled) {
   background: #1d4ed8;
+}
+
+.model-setup__button--downloading {
+  --download-progress: 0%;
+  background: linear-gradient(
+    90deg,
+    #1d4ed8 0 var(--download-progress),
+    #60a5fa var(--download-progress) 100%
+  );
 }
 
 .model-setup__button:disabled {
@@ -193,4 +212,10 @@ button:focus-visible {
 .model-setup__note {
   margin: 20px 0 0;
   font-size: 13px;
+}
+
+@media (max-width: 540px) {
+  .model-setup__actions {
+    grid-template-columns: 1fr;
+  }
 }

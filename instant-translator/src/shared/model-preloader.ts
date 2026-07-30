@@ -180,27 +180,6 @@ async function preloadLanguageDetector(
     );
   }
 
-  let availability: Awaited<ReturnType<typeof LanguageDetector.availability>>;
-
-  try {
-    availability = await LanguageDetector.availability();
-  } catch {
-    throw new ModelPreloadSkippedError(
-      '無法取得內建語言偵測模型狀態，將使用 Chrome i18n 備援。',
-    );
-  }
-
-  if (availability === 'unavailable') {
-    throw new ModelPreloadSkippedError(
-      '目前裝置不支援內建語言偵測，將使用 Chrome i18n 備援。',
-    );
-  }
-
-  onProgress(
-    availability === 'available' ? 100 : 0,
-    availability === 'available' ? 'completed' : 'downloading',
-  );
-
   let lastPercentage = -1;
   let detector: Awaited<ReturnType<typeof LanguageDetector.create>>;
 
@@ -248,20 +227,6 @@ async function preloadTranslatorPair(
     throw new Error('目前瀏覽器不支援 Translator API。');
   }
 
-  const availability = await Translator.availability(pair);
-
-  if (availability === 'unavailable') {
-    throw new DOMException(
-      'Unsupported translation pair.',
-      'NotSupportedError',
-    );
-  }
-
-  onProgress(
-    availability === 'available' ? 100 : 0,
-    availability === 'available' ? 'completed' : 'downloading',
-  );
-
   let lastPercentage = -1;
   const translator = await Translator.create({
     ...pair,
@@ -284,6 +249,38 @@ async function preloadTranslatorPair(
 
 export function createPairKey(pair: TranslationPair): string {
   return `${pair.sourceLanguage}→${pair.targetLanguage}`;
+}
+
+export async function getAvailableTranslationPairResults(
+  pairs: TranslationPair[],
+): Promise<ModelPreloadResult[]> {
+  if (!('Translator' in self)) {
+    return [];
+  }
+
+  const results = await Promise.all(
+    pairs.map(async (pair): Promise<ModelPreloadResult | null> => {
+      try {
+        const availability = await Translator.availability(pair);
+
+        if (availability !== 'available') {
+          return null;
+        }
+
+        return {
+          taskId: createPairKey(pair),
+          taskLabel: `${getLanguageLabel(pair.sourceLanguage)} → ${getLanguageLabel(pair.targetLanguage)}`,
+          status: 'completed',
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return results.filter(
+    (result): result is ModelPreloadResult => result !== null,
+  );
 }
 
 function getLanguageLabel(language: string): string {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   computed,
+  onMounted,
   ref,
 } from 'vue';
 
@@ -9,6 +10,7 @@ import {
 } from '../../src/shared/logger';
 import {
   createPairKey,
+  getAvailableTranslationPairResults,
   preloadRecommendedModels,
 } from '../../src/shared/model-preloader';
 
@@ -33,10 +35,65 @@ const RECOMMENDED_PAIRS = [
   },
 ] satisfies TranslationPair[];
 
+interface RecommendedModelTask {
+  taskId: string;
+  taskLabel: string;
+  translationPairs: TranslationPair[];
+  includeLanguageDetector: boolean;
+}
+
+const RECOMMENDED_TASKS: RecommendedModelTask[] = [
+  ...RECOMMENDED_PAIRS.map((pair) => ({
+    taskId: createPairKey(pair),
+    taskLabel: `${getLanguageLabel(pair.sourceLanguage)} → ${getLanguageLabel(pair.targetLanguage)}`,
+    translationPairs: [pair],
+    includeLanguageDetector: false,
+  })),
+  {
+    taskId: 'language-detector',
+    taskLabel: '內建語言偵測模型',
+    translationPairs: [],
+    includeLanguageDetector: true,
+  },
+];
+
+const TRANSLATION_MODEL_TASKS = RECOMMENDED_TASKS.filter(
+  (task) => task.translationPairs.length > 0,
+);
+
 const isPreparing = ref(false);
 const progress = ref<ModelPreloadProgress | null>(null);
 const results = ref<ModelPreloadResult[]>([]);
 const errorMessage = ref('');
+const activeTaskId = ref<string | null>(null);
+const activeTaskIds = ref(new Set<string>());
+const taskProgressById = ref<Record<string, ModelPreloadProgress>>({});
+
+onMounted(() => {
+  void getAvailableTranslationPairResults(RECOMMENDED_PAIRS)
+    .then((availableResults) => {
+      const resultsByTaskId = new Map(
+        results.value.map((result) => [result.taskId, result]),
+      );
+
+      for (const result of availableResults) {
+        if (!resultsByTaskId.has(result.taskId)) {
+          resultsByTaskId.set(result.taskId, result);
+        }
+      }
+
+      results.value = RECOMMENDED_TASKS.flatMap((task) => {
+        const result = resultsByTaskId.get(task.taskId);
+
+        return result ? [result] : [];
+      });
+    })
+    .catch((error: unknown) => {
+      errorLog('[Instant Translator] Model availability check failed', error, {
+        code: 'MODEL_AVAILABILITY_CHECK_FAILED',
+      });
+    });
+});
 
 const completedCount = computed(() =>
   results.value.filter((result) => result.status === 'completed').length,
@@ -50,6 +107,25 @@ const skippedCount = computed(() =>
   results.value.filter((result) => result.status === 'skipped').length,
 );
 
+const nextTask = computed(() =>
+  RECOMMENDED_TASKS.find((task) => {
+    const result = results.value.find(
+      (item) => item.taskId === task.taskId,
+    );
+
+    return !result || result.status === 'failed';
+  }),
+);
+
+const activeTaskPosition = computed(() => {
+  const taskId = activeTaskId.value ?? nextTask.value?.taskId;
+  const taskIndex = RECOMMENDED_TASKS.findIndex(
+    (task) => task.taskId === taskId,
+  );
+
+  return taskIndex >= 0 ? taskIndex + 1 : RECOMMENDED_TASKS.length;
+});
+
 const failedTaskIds = computed(() =>
   new Set(
     results.value
@@ -57,6 +133,26 @@ const failedTaskIds = computed(() =>
       .map((result) => result.taskId),
   ),
 );
+
+const singlePrepareButtonLabel = computed(() => {
+  if (isPreparing.value) {
+    return '正在下載模型…';
+  }
+
+  const task = nextTask.value;
+
+  if (!task) {
+    return '所有模型已準備完成';
+  }
+
+  const previousResult = results.value.find(
+    (result) => result.taskId === task.taskId,
+  );
+
+  return previousResult?.status === 'failed'
+    ? `重試下載：${task.taskLabel}`
+    : `下載：${task.taskLabel}`;
+});
 
 const prepareButtonLabel = computed(() => {
   if (isPreparing.value) {
@@ -132,6 +228,163 @@ async function handlePrepareModels(): Promise<void> {
     isPreparing.value = false;
   }
 }
+
+async function handlePrepareNextModel(): Promise<void> {
+  if (isPreparing.value) {
+    return;
+  }
+
+  const task = nextTask.value;
+
+  if (!task) {
+    return;
+  }
+
+  const previousResults = results.value;
+
+  isPreparing.value = true;
+  activeTaskId.value = task.taskId;
+  progress.value = null;
+  errorMessage.value = '';
+
+  try {
+    const newResults = await preloadRecommendedModels({
+      includeLanguageDetector: task.includeLanguageDetector,
+      translationPairs: task.translationPairs,
+      onProgress(newProgress) {
+        progress.value = newProgress;
+      },
+    });
+
+    const resultsByTaskId = new Map(
+      [...previousResults, ...newResults].map((result) => [
+        result.taskId,
+        result,
+      ]),
+    );
+
+    results.value = RECOMMENDED_TASKS.flatMap((recommendedTask) => {
+      const result = resultsByTaskId.get(recommendedTask.taskId);
+
+      return result ? [result] : [];
+    });
+  } catch (error: unknown) {
+    errorLog('[Instant Translator] Model preload start failed', error, {
+      code: 'MODEL_PRELOAD_START_FAILED',
+    });
+
+    errorMessage.value =
+      error instanceof Error
+        ? error.message
+        : '模型下載無法開始，請再試一次。';
+  } finally {
+    isPreparing.value = false;
+    activeTaskId.value = null;
+  }
+}
+
+async function handlePrepareModel(
+  task: RecommendedModelTask,
+): Promise<void> {
+  if (activeTaskIds.value.has(task.taskId)) {
+    return;
+  }
+
+  activeTaskIds.value = new Set([
+    ...activeTaskIds.value,
+    task.taskId,
+  ]);
+  errorMessage.value = '';
+
+  try {
+    const newResults = await preloadRecommendedModels({
+      includeLanguageDetector: task.includeLanguageDetector,
+      translationPairs: task.translationPairs,
+      onProgress(newProgress) {
+        taskProgressById.value = {
+          ...taskProgressById.value,
+          [task.taskId]: newProgress,
+        };
+      },
+    });
+
+    const resultsByTaskId = new Map(
+      [...results.value, ...newResults].map((result) => [
+        result.taskId,
+        result,
+      ]),
+    );
+
+    results.value = RECOMMENDED_TASKS.flatMap((recommendedTask) => {
+      const result = resultsByTaskId.get(recommendedTask.taskId);
+
+      return result ? [result] : [];
+    });
+  } catch (error: unknown) {
+    errorLog('[Instant Translator] Model preload start failed', error, {
+      code: 'MODEL_PRELOAD_START_FAILED',
+    });
+
+    errorMessage.value =
+      error instanceof Error
+        ? error.message
+        : '模型下載無法開始，請再試一次。';
+  } finally {
+    const nextActiveTaskIds = new Set(activeTaskIds.value);
+
+    nextActiveTaskIds.delete(task.taskId);
+    activeTaskIds.value = nextActiveTaskIds;
+  }
+}
+
+function getTaskButtonLabel(task: RecommendedModelTask): string {
+  const progress = taskProgressById.value[task.taskId];
+
+  if (activeTaskIds.value.has(task.taskId)) {
+    return progress?.status === 'downloading'
+      ? `下載中 ${progress.taskPercentage}%`
+      : '正在準備…';
+  }
+
+  const result = results.value.find(
+    (item) => item.taskId === task.taskId,
+  );
+
+  if (result?.status === 'completed') {
+    return '已下載';
+  }
+
+  return result?.status === 'failed' ? '重試下載' : '下載模型';
+}
+
+function getTaskButtonStyle(
+  task: RecommendedModelTask,
+): Record<string, string> | undefined {
+  if (!activeTaskIds.value.has(task.taskId)) {
+    return undefined;
+  }
+
+  const percentage = taskProgressById.value[task.taskId]?.taskPercentage ?? 0;
+
+  return {
+    '--download-progress': `${percentage}%`,
+  };
+}
+
+function getLanguageLabel(language: string): string {
+  switch (language) {
+    case 'en':
+      return '英文';
+    case 'ja':
+      return '日文';
+    case 'ko':
+      return '韓文';
+    case 'zh-Hant':
+      return '繁體中文';
+    default:
+      return language;
+  }
+}
 </script>
 
 <template>
@@ -168,14 +421,22 @@ async function handlePrepareModels(): Promise<void> {
         <li>韓文 → 繁體中文</li>
       </ul>
 
-      <button
-        class="model-setup__button"
-        type="button"
-        :disabled="isPreparing"
-        @click="handlePrepareModels"
-      >
-        {{ prepareButtonLabel }}
-      </button>
+      <div class="model-setup__actions">
+        <button
+          v-for="task in TRANSLATION_MODEL_TASKS"
+          :key="task.taskId"
+          class="model-setup__button"
+          :class="{
+            'model-setup__button--downloading': activeTaskIds.has(task.taskId),
+          }"
+          type="button"
+          :disabled="activeTaskIds.has(task.taskId) || results.some((result) => result.taskId === task.taskId && result.status === 'completed')"
+          :style="getTaskButtonStyle(task)"
+          @click="handlePrepareModel(task)"
+        >
+          {{ task.taskLabel }}：{{ getTaskButtonLabel(task) }}
+        </button>
+      </div>
     </section>
 
     <section
@@ -210,34 +471,6 @@ async function handlePrepareModels(): Promise<void> {
     </section>
 
     <template v-if="!isPreparing && results.length > 0">
-      <ul class="model-result-list">
-        <li
-          v-for="result in results"
-          :key="result.taskId"
-          class="model-result-item"
-        >
-          <div>
-            <strong>{{ result.taskLabel }}</strong>
-            <small v-if="result.reason">
-              {{ result.reason }}
-            </small>
-          </div>
-
-          <span
-            class="model-result-item__status"
-            :class="`model-result-item__status--${result.status}`"
-          >
-            {{
-              result.status === 'completed'
-                ? '已完成'
-                : result.status === 'skipped'
-                  ? '不需要'
-                  : '失敗'
-            }}
-          </span>
-        </li>
-      </ul>
-
       <p
         class="model-setup__summary"
         aria-live="polite"
