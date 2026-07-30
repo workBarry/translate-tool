@@ -3,6 +3,7 @@ import {
   computed,
   nextTick,
   onBeforeUnmount,
+  onMounted,
   ref,
   watch,
 } from 'vue';
@@ -69,6 +70,7 @@ const targetLanguageOptions: ReadonlyArray<{
 const cardElement = ref<HTMLElement | null>(null);
 let resizeObserver: ResizeObserver | null = null;
 let correctionFrame: number | null = null;
+let viewportDismissed = false;
 
 const detectedLanguageMessage = computed(() => {
   if (
@@ -150,6 +152,49 @@ function handleRetry(): void {
   emit('retry');
 }
 
+function handleWindowResize(): void {
+  if (props.state.status === 'hidden') {
+    return;
+  }
+
+  schedulePositionCorrection();
+}
+
+function handleVisualViewportChange(): void {
+  if (props.state.status === 'hidden') {
+    return;
+  }
+
+  schedulePositionCorrection();
+}
+
+function handleDocumentScroll(event: Event): void {
+  if (
+    props.state.status === 'hidden' ||
+    viewportDismissed
+  ) {
+    return;
+  }
+
+  const card = cardElement.value;
+
+  if (!card) {
+    return;
+  }
+
+  const eventPath =
+    typeof event.composedPath === 'function'
+      ? event.composedPath()
+      : [];
+
+  if (eventPath.includes(card)) {
+    return;
+  }
+
+  viewportDismissed = true;
+  emit('close');
+}
+
 function schedulePositionCorrection(): void {
   if (props.state.status === 'hidden') {
     return;
@@ -225,11 +270,56 @@ watch(
   { flush: 'post' },
 );
 
+watch(
+  () => props.state.status,
+  (status) => {
+    if (status !== 'hidden') {
+      viewportDismissed = false;
+    }
+  },
+);
+
+onMounted(() => {
+  window.addEventListener('resize', handleWindowResize);
+  window.visualViewport?.addEventListener(
+    'resize',
+    handleVisualViewportChange,
+  );
+  window.visualViewport?.addEventListener(
+    'scroll',
+    handleVisualViewportChange,
+  );
+  document.addEventListener(
+    'scroll',
+    handleDocumentScroll,
+    true,
+  );
+
+  schedulePositionCorrection();
+});
+
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
+  resizeObserver = null;
+
+  window.removeEventListener('resize', handleWindowResize);
+  window.visualViewport?.removeEventListener(
+    'resize',
+    handleVisualViewportChange,
+  );
+  window.visualViewport?.removeEventListener(
+    'scroll',
+    handleVisualViewportChange,
+  );
+  document.removeEventListener(
+    'scroll',
+    handleDocumentScroll,
+    true,
+  );
 
   if (correctionFrame !== null) {
     cancelAnimationFrame(correctionFrame);
+    correctionFrame = null;
   }
 });
 </script>
@@ -244,6 +334,9 @@ onBeforeUnmount(() => {
       role="dialog"
       aria-label="即時翻譯"
       aria-live="polite"
+      @scroll.stop
+      @wheel.stop
+      @touchmove.stop
       @pointerdown.stop
       @pointerup.stop
       @click.stop

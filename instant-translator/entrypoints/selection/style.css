@@ -19,6 +19,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 
   /*
    * Shadow Host 和外層容器本來就是透明的，

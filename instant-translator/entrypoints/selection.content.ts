@@ -69,7 +69,11 @@ interface TranslationUi {
 }
 
 export default defineContentScript({
-  matches: ["http://*/*", "https://*/*"],
+  matches: ["<all_urls>"],
+
+  allFrames: false,
+
+  runAt: "document_idle",
 
   /*
    * 匯入的 selection/style.css
@@ -78,6 +82,10 @@ export default defineContentScript({
   cssInjectionMode: "ui",
 
   async main(ctx) {
+    if (window.top !== window) {
+      return;
+    }
+
     const instanceId = crypto.randomUUID();
 
     const globalScope = globalThis as typeof globalThis & TranslatorGlobalScope;
@@ -1137,59 +1145,34 @@ export default defineContentScript({
     /*
      * 網頁捲動時關閉卡片。
      */
-    ctx.addEventListener(
-      window,
-      "scroll",
-      () => {
-        if (!isCurrentInstance()) {
-          return;
-        }
-
-        if (state.status === "hidden") {
-          return;
-        }
-
-        hidePopover();
-      },
-      {
-        capture: true,
-        passive: true,
-      },
-    );
-
     /*
      * 視窗尺寸改變時關閉卡片，
      * 避免卡片停留在錯誤位置。
      */
-    ctx.addEventListener(
-      window,
-      "resize",
-      () => {
-        if (!isCurrentInstance()) {
-          return;
-        }
-
-        if (state.status === "hidden") {
-          return;
-        }
-
-        hidePopover();
-      },
-      {
-        passive: true,
-      },
-    );
-
     /*
      * SPA 網址切換時清除目前卡片。
      */
-    ctx.addEventListener(window, "wxt:locationchange", () => {
+    const dismissForPageLifecycle = (): void => {
       if (!isCurrentInstance()) {
         return;
       }
 
       hidePopover();
+    };
+
+    ctx.addEventListener(window, "pagehide", dismissForPageLifecycle);
+
+    ctx.addEventListener(document, "visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        return;
+      }
+
+      dismissForPageLifecycle();
     });
+
+    ctx.addEventListener(window, "popstate", dismissForPageLifecycle);
+    ctx.addEventListener(window, "hashchange", dismissForPageLifecycle);
+    ctx.addEventListener(window, "wxt:locationchange", dismissForPageLifecycle);
 
     /*
      * WXT HMR、擴充功能重載或
