@@ -1,36 +1,35 @@
-import type { TextSelection } from './types';
+export function getCurrentSelectedText(
+  target: EventTarget | null,
+): string {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement
+  ) {
+    const selectionStart = target.selectionStart;
+    const selectionEnd = target.selectionEnd;
 
-export function getTextSelection(
-  event: PointerEvent,
-): TextSelection | null {
-  // 目前只處理滑鼠左鍵。
-  if (event.button !== 0) {
-    return null;
+    if (
+      selectionStart === null ||
+      selectionEnd === null ||
+      selectionStart === selectionEnd
+    ) {
+      return '';
+    }
+
+    return target.value
+      .slice(selectionStart, selectionEnd)
+      .trim();
   }
 
   const selection = window.getSelection();
 
-  if (!selection) {
-    return null;
+  if (
+    !selection ||
+    selection.rangeCount === 0 ||
+    selection.isCollapsed
+  ) {
+    return '';
   }
 
-  if (selection.rangeCount === 0) {
-    return null;
-  }
-
-  if (selection.isCollapsed) {
-    return null;
-  }
-
-  const text = selection.toString().trim();
-
-  if (!text) {
-    return null;
-  }
-
-  return {
-    text,
-    pointerX: event.clientX,
-    pointerY: event.clientY,
-  };
+  return selection.toString().trim();
 }

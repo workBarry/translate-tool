@@ -29,7 +29,7 @@ import {
 import TranslationCard from "./selection/TranslationCard.vue";
 import { PopoverController } from "./selection/popover-controller";
 import { calculatePopoverPosition } from "./selection/position-calculator";
-import { getTextSelection } from "./selection/selection-detector";
+import { getCurrentSelectedText } from "./selection/selection-detector";
 import { translateWithChrome } from "./selection/native-translation.provider";
 import {
   createTranslationError,
@@ -185,6 +185,8 @@ export default defineContentScript({
      * 同時執行兩次 createShadowRootUi。
      */
     let uiMountPromise: Promise<void> | null = null;
+
+    let selectionProcessFrame: number | null = null;
 
     const abortActiveTranslation = (): void => {
       const controller = activeAbortController;
@@ -1083,7 +1085,11 @@ export default defineContentScript({
       document,
       "pointerup",
       (event) => {
-        if (!isCurrentInstance()) {
+        if (
+          !state.enabled ||
+          ctx.isInvalid ||
+          !isCurrentInstance()
+        ) {
           return;
         }
 
@@ -1102,17 +1108,33 @@ export default defineContentScript({
           return;
         }
 
-        const selection = getTextSelection(event);
+        const pointerX = event.clientX;
+        const pointerY = event.clientY;
+        const eventTarget = event.target;
 
-        if (!selection) {
-          return;
+        if (selectionProcessFrame !== null) {
+          cancelAnimationFrame(selectionProcessFrame);
         }
 
-        handleSelectedText(
-          selection.text,
-          selection.pointerX,
-          selection.pointerY,
-        );
+        selectionProcessFrame = requestAnimationFrame(() => {
+          selectionProcessFrame = null;
+
+          if (ctx.isInvalid || !isCurrentInstance()) {
+            return;
+          }
+
+          const selectedText = getCurrentSelectedText(eventTarget);
+
+          if (!selectedText) {
+            if (state.status !== "hidden") {
+              hidePopover();
+            }
+
+            return;
+          }
+
+          handleSelectedText(selectedText, pointerX, pointerY);
+        });
       },
       {
         capture: true,
@@ -1181,6 +1203,11 @@ export default defineContentScript({
     ctx.onInvalidated(() => {
       latestRequestId = null;
 
+      if (selectionProcessFrame !== null) {
+        cancelAnimationFrame(selectionProcessFrame);
+        selectionProcessFrame = null;
+      }
+
       abortActiveTranslation();
 
       void destroyLanguageDetector().catch((error: unknown) => {
@@ -1225,6 +1252,7 @@ export default defineContentScript({
  */
 function configureOverlayHost(shadowHost: HTMLElement, container: HTMLElement, instanceId: string): void {
   shadowHost.dataset["instantTranslatorInstance"] = instanceId;
+  shadowHost.dataset["instantTranslatorHost"] = "true";
 
   const hostStyles: Record<string, string> = {
     all: "initial",
@@ -1357,14 +1385,16 @@ function applyImportantStyles(element: HTMLElement, styles: Record<string, strin
 
 function isTranslatorUiEvent(event: Event): boolean {
   return event.composedPath().some((node) => {
-    if (!(node instanceof Element)) {
+    if (!(node instanceof HTMLElement)) {
       return false;
     }
 
     return (
       node.matches("instant-translator") ||
       node.id === "instant-translator-app" ||
-      node.classList.contains("translation-card")
+      node.classList.contains("translation-card") ||
+      node.dataset.instantTranslatorHost === "true" ||
+      node.dataset.instantTranslatorRoot !== undefined
     );
   });
 }

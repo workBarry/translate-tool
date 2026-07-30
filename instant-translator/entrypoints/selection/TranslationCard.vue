@@ -330,6 +330,7 @@ onBeforeUnmount(() => {
       v-if="state.status !== 'hidden'"
       ref="cardElement"
       class="translation-card"
+      data-instant-translator-root
       :style="{ left: `${state.left}px`, top: `${state.top}px` }"
       role="dialog"
       aria-label="即時翻譯"
