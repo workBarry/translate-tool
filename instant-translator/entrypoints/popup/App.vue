@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import {
+  errorLog,
+} from "../../src/shared/logger";
+
+
+import {
   computed,
   onBeforeUnmount,
   onMounted,
@@ -102,7 +107,7 @@ onMounted(async () => {
         },
       );
   } catch (error: unknown) {
-    console.error(
+    errorLog(
       '[Instant Translator] Popup 載入設定失敗',
       error,
     );
@@ -241,7 +246,7 @@ function queueSettingsSave():
       })
       .catch(
         (error: unknown) => {
-          console.error(
+          errorLog(
             '[Instant Translator] Popup 保存設定失敗',
             {
               snapshot,
@@ -295,7 +300,7 @@ async function handleReset():
       '已恢復預設設定',
     );
   } catch (error: unknown) {
-    console.error(
+    errorLog(
       '[Instant Translator] 重設設定失敗',
       error,
     );

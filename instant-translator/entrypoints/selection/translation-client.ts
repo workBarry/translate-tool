@@ -1,3 +1,7 @@
+import {
+  errorLog,
+} from "../../src/shared/logger";
+
 import { browser } from 'wxt/browser';
 
 import {
@@ -127,7 +131,7 @@ export async function translateInBackground(
       throw error;
     }
 
-    console.error(
+    errorLog(
       '[Instant Translator] Background 通訊失敗',
       error,
     );

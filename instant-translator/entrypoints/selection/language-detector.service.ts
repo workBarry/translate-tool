@@ -1,4 +1,8 @@
 import {
+  debugLog,
+} from "../../src/shared/logger";
+
+import {
   browser,
 } from 'wxt/browser';
 
@@ -145,6 +149,7 @@ export async function resolveSourceLanguageWithDetector(
       logTranslationError(
         'Built-In Language Detector 無法使用，改用 Chrome i18n 備援',
         error,
+        { phase: 'detect' },
       );
     }
   }
@@ -196,7 +201,7 @@ function resolveBuiltInDetectorResult(input: {
   const minimumGap = input.textLength >= 8 ? 0.08 : 0.04;
   const confidenceGap = first.confidence - (second?.confidence ?? 0);
 
-  console.log(
+  debugLog(
     '[Instant Translator] 語言偵測判定',
     {
       textLength: input.textLength,
@@ -263,7 +268,11 @@ async function detectWithChromeI18n(
       method: 'chrome-i18n',
     };
   } catch (error: unknown) {
-    logTranslationError('Chrome i18n 語言偵測失敗', error);
+    logTranslationError(
+      'Chrome i18n 語言偵測失敗',
+      error,
+      { phase: 'detect' },
+    );
 
     return ambiguousResolution();
   }
@@ -309,7 +318,7 @@ function getLanguageDetectorSession(
               listener(detectorProgress);
             }
 
-            console.log(
+            debugLog(
               '[Instant Translator] Language Detector 模型下載中',
               { percentage: detectorProgress },
             );

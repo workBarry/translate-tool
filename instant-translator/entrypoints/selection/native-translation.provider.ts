@@ -94,7 +94,15 @@ export async function translateWithChrome(
       throw firstError;
     }
 
-    logTranslationError('第一次翻譯失敗，準備重建 Session', firstError);
+    logTranslationError(
+      '第一次翻譯失敗，準備重建 Session',
+      firstError,
+      {
+        phase: 'translate',
+        sourceLanguage,
+        targetLanguage,
+      },
+    );
 
     await invalidateTranslatorSession(sourceLanguage, targetLanguage);
     input.signal.throwIfAborted();
@@ -106,7 +114,15 @@ export async function translateWithChrome(
         throw secondError;
       }
 
-      logTranslationError('重建 Session 後翻譯仍失敗', secondError);
+      logTranslationError(
+        '重建 Session 後翻譯仍失敗',
+        secondError,
+        {
+          phase: 'translate',
+          sourceLanguage,
+          targetLanguage,
+        },
+      );
 
       throw normalizeTranslationError(secondError, 'translate');
     }

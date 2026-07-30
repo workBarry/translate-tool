@@ -1,3 +1,8 @@
+import {
+  debugLog,
+  errorLog,
+} from "../src/shared/logger";
+
 import { defineBackground } from '#imports';
 import {
   browser,
@@ -27,7 +32,7 @@ import {
 const MAX_TEXT_LENGTH = 500;
 
 export default defineBackground(() => {
-  console.log(
+  debugLog(
     '[Instant Translator Background] Service Worker 已啟動',
   );
 
@@ -105,7 +110,7 @@ async function handleTranslateMessage(
     abortController,
   );
 
-  console.log(
+  debugLog(
     '[Instant Translator Background] 開始翻譯',
     {
       requestId,
@@ -141,7 +146,7 @@ async function handleTranslateMessage(
       };
     }
 
-    console.error(
+    errorLog(
       '[Instant Translator Background] 翻譯失敗',
       {
         requestId,
@@ -194,7 +199,7 @@ function handleCancelTranslationMessage(
   activeController?.abort();
   activeRequests.delete(requestId);
 
-  console.log(
+  debugLog(
     '[Instant Translator Background] 取消翻譯',
     {
       requestId,

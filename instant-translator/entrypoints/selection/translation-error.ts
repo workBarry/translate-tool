@@ -1,3 +1,7 @@
+import {
+  errorLog,
+} from '../../src/shared/logger';
+
 export const TRANSLATION_ERROR_CODES = [
   'API_UNAVAILABLE',
   'LANGUAGE_AMBIGUOUS',
@@ -284,24 +288,33 @@ export function normalizeTranslationError(
 export function logTranslationError(
   message: string,
   error: unknown,
+  context?: {
+    requestId?: string;
+    phase?: TranslationFailurePhase;
+    sourceLanguage?: string;
+    targetLanguage?: string;
+  },
 ): void {
-  const normalizedError =
-    error instanceof Error
-      ? error
-      : null;
+  const normalized = normalizeTranslationError(
+    error,
+    context?.phase ?? 'unknown',
+  );
+  const originalError = normalized.originalError;
 
-  const cause =
-    error instanceof InstantTranslationError
-      ? error.originalError
-      : undefined;
-
-  console.error(
-    `[Instant Translator] ${message}`,
+  errorLog(
+    message,
+    originalError ?? normalized,
     {
-      errorName: normalizedError?.name ?? typeof error,
-      errorMessage: normalizedError?.message ?? String(error),
-      causeName: cause instanceof Error ? cause.name : undefined,
-      causeMessage: cause instanceof Error ? cause.message : undefined,
+      requestId: context?.requestId,
+      phase: context?.phase ?? 'unknown',
+      code: normalized.code,
+      sourceLanguage: context?.sourceLanguage,
+      targetLanguage: context?.targetLanguage,
+      retryable: normalized.retryable,
+      causeName:
+        import.meta.env.DEV && originalError instanceof Error
+          ? originalError.name
+          : undefined,
     },
   );
 }

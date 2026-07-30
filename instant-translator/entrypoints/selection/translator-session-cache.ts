@@ -1,3 +1,8 @@
+import {
+  debugLog,
+  errorLog,
+} from "../../src/shared/logger";
+
 export interface TranslatorSessionInput {
   sourceLanguage: string;
   targetLanguage: string;
@@ -91,6 +96,8 @@ export function getTranslatorSession(
    * 關閉卡片或重新選字時，
    * 模型下載仍會繼續。
    */
+  let lastReportedPercentage = -1;
+
   const sessionPromise =
     Translator.create({
       sourceLanguage:
@@ -134,7 +141,13 @@ export function getTranslatorSession(
               input.onPreparing?.();
             }
 
-            console.log(
+            if (percentage === lastReportedPercentage) {
+              return;
+            }
+
+            lastReportedPercentage = percentage;
+
+            debugLog(
               '[Instant Translator] Translator session 進度',
               {
                 sourceLanguage:
@@ -155,7 +168,7 @@ export function getTranslatorSession(
 
         input.onPreparing?.();
 
-        console.log(
+        debugLog(
           '[Instant Translator] Translator session 已可使用',
           {
             sourceLanguage:
@@ -177,16 +190,15 @@ export function getTranslatorSession(
           sessionEntries.delete(key);
         }
 
-        console.error(
+        errorLog(
           '[Instant Translator] Translator session 建立失敗',
+          error,
           {
             sourceLanguage:
               input.sourceLanguage,
 
             targetLanguage:
               input.targetLanguage,
-
-            error,
           },
         );
 

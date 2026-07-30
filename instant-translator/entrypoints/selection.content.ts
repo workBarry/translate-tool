@@ -1,3 +1,8 @@
+import {
+  debugLog,
+  errorLog,
+} from "../src/shared/logger";
+
 import { browser, type Browser } from "wxt/browser";
 import {
   loadTranslatorSettings,
@@ -34,6 +39,7 @@ import { translateWithChrome } from "./selection/native-translation.provider";
 import {
   createTranslationError,
   isAbortError,
+  logTranslationError,
   normalizeTranslationError,
 } from "./selection/translation-error";
 import "./selection/style.css";
@@ -46,6 +52,7 @@ import type { TranslationLanguage } from "./selection/types";
  * 也就是 <instant-translator>。
  */
 const TRANSLATOR_HOST_TAG = "instant-translator";
+const CONTENT_SCRIPT_MARKER = "data-instant-translator-loaded";
 
 /*
  * 用來辨識目前頁面中最新的 Content Script instance。
@@ -82,7 +89,18 @@ export default defineContentScript({
   cssInjectionMode: "ui",
 
   async main(ctx) {
+    if (document.documentElement.hasAttribute(CONTENT_SCRIPT_MARKER)) {
+      debugLog("Content Script 已存在，略過重複注入");
+      return;
+    }
+
+    document.documentElement.setAttribute(
+      CONTENT_SCRIPT_MARKER,
+      "true",
+    );
+
     if (window.top !== window) {
+      document.documentElement.removeAttribute(CONTENT_SCRIPT_MARKER);
       return;
     }
 
@@ -100,12 +118,11 @@ export default defineContentScript({
       return globalScope[GLOBAL_INSTANCE_KEY] === instanceId;
     };
 
-    console.log("[Instant Translator] Content Script 已載入", {
+    debugLog("[Instant Translator] Content Script 已載入", {
       instanceId,
-      url: window.location.href,
     });
     const initialSettings = await loadTranslatorSettings().catch((error: unknown) => {
-      console.error("[Instant Translator] 載入設定失敗", error);
+      errorLog("[Instant Translator] 載入設定失敗", error);
 
       return {
         ...DEFAULT_TRANSLATOR_SETTINGS,
@@ -237,7 +254,7 @@ export default defineContentScript({
           latestSpeechRequestId = null;
         }
 
-        console.error("[Instant Translator] 原文發音失敗", error);
+        errorLog("[Instant Translator] 原文發音失敗", error);
 
         popoverController.showSpeechError(error instanceof Error ? error.message : "原文發音失敗");
       }
@@ -287,7 +304,7 @@ export default defineContentScript({
           latestSpeechRequestId = null;
         }
 
-        console.error("[Instant Translator] 譯文發音失敗", error);
+        errorLog("[Instant Translator] 譯文發音失敗", error);
 
         popoverController.showSpeechError(error instanceof Error ? error.message : "譯文發音失敗");
       }
@@ -308,7 +325,7 @@ export default defineContentScript({
 
         popoverController.finishSpeech();
       } catch (error: unknown) {
-        console.error("[Instant Translator] 停止發音失敗", error);
+        errorLog("[Instant Translator] 停止發音失敗", error);
 
         popoverController.showSpeechError(error instanceof Error ? error.message : "無法停止發音");
       }
@@ -424,7 +441,7 @@ export default defineContentScript({
 
             app.mount(mountPoint);
 
-            console.log("[Instant Translator] Shadow UI 已掛載", {
+            debugLog("[Instant Translator] Shadow UI 已掛載", {
               instanceId,
               shadowHost,
               container,
@@ -442,7 +459,7 @@ export default defineContentScript({
             mounted?.app.unmount();
             mounted?.mountPoint.remove();
 
-            console.log("[Instant Translator] Shadow UI 已移除", {
+            debugLog("[Instant Translator] Shadow UI 已移除", {
               instanceId,
             });
           },
@@ -466,7 +483,7 @@ export default defineContentScript({
         translationUi = createdUi;
       })()
         .catch((error: unknown) => {
-          console.error("[Instant Translator] Shadow UI 建立失敗", error);
+          errorLog("[Instant Translator] Shadow UI 建立失敗", error);
 
           throw error;
         })
@@ -557,7 +574,7 @@ export default defineContentScript({
 
       const pageLanguage = getSelectionLanguageHint();
 
-      console.log("[Instant Translator] 準備呼叫 translateWithChrome", {
+      debugLog("[Instant Translator] 準備呼叫 translateWithChrome", {
         requestId,
         pageLanguage,
         targetLanguage: state.targetLanguage,
@@ -588,7 +605,7 @@ export default defineContentScript({
 
           popoverController.showModelDownloading(percentage);
 
-          console.log("[Instant Translator] 模型下載中", {
+          debugLog("[Instant Translator] 模型下載中", {
             requestId,
             percentage,
           });
@@ -601,7 +618,7 @@ export default defineContentScript({
 
           popoverController.showModelPreparing();
 
-          console.log("[Instant Translator] 模型下載完成，正在準備 session", {
+          debugLog("[Instant Translator] 模型下載完成，正在準備 session", {
             requestId,
           });
         },
@@ -613,13 +630,13 @@ export default defineContentScript({
 
           popoverController.showModelReady();
 
-          console.log("[Instant Translator] Translator session 已可使用", {
+          debugLog("[Instant Translator] Translator session 已可使用", {
             requestId,
           });
         },
       });
 
-      console.log("[Instant Translator] translateWithChrome 已回傳 Promise", {
+      debugLog("[Instant Translator] translateWithChrome 已回傳 Promise", {
         requestId,
       });
 
@@ -638,14 +655,14 @@ export default defineContentScript({
 
           const result = await translationPromise;
 
-          console.log("[Instant Translator] translateWithChrome Promise 已完成", {
+          debugLog("[Instant Translator] translateWithChrome Promise 已完成", {
             requestId,
             sourceLanguage: result.sourceLanguage,
             targetLanguage: result.targetLanguage,
           });
 
           if (requestId !== latestRequestId) {
-            console.log("[Instant Translator] 忽略舊翻譯結果", {
+            debugLog("[Instant Translator] 忽略舊翻譯結果", {
               requestId,
               latestRequestId,
             });
@@ -665,7 +682,7 @@ export default defineContentScript({
 
           popoverController.showSuccess(result.translatedText);
 
-          console.log("[Instant Translator] 收到 Chrome 翻譯結果", {
+          debugLog("[Instant Translator] 收到 Chrome 翻譯結果", {
             requestId,
 
             sourceLanguage: result.sourceLanguage,
@@ -674,14 +691,14 @@ export default defineContentScript({
 
           });
         } catch (error: unknown) {
-          console.error("[Instant Translator] translateWithChrome Promise 失敗", {
+          errorLog("[Instant Translator] translateWithChrome Promise 失敗", {
             requestId,
             error,
             aborted: abortController.signal.aborted,
           });
 
           if (isAbortError(error)) {
-            console.log("[Instant Translator] 翻譯已取消", {
+            debugLog("[Instant Translator] 翻譯已取消", {
               requestId,
             });
 
@@ -696,7 +713,7 @@ export default defineContentScript({
             return;
           }
 
-          console.error("[Instant Translator] Chrome 翻譯失敗", {
+          errorLog("[Instant Translator] Chrome 翻譯失敗", {
             requestId,
             error,
           });
@@ -799,7 +816,7 @@ export default defineContentScript({
             return;
           }
 
-          console.log("[Instant Translator] Language Detector 模型下載中", { requestId, percentage });
+          debugLog("[Instant Translator] Language Detector 模型下載中", { requestId, percentage });
         },
       })
         .then((resolution) => {
@@ -836,10 +853,10 @@ export default defineContentScript({
             return;
           }
 
-          console.error("[Instant Translator] 來源語言偵測失敗", {
+          logTranslationError("來源語言偵測失敗", error, {
             requestId,
-            code: normalizedError.code,
-            errorName: error instanceof Error ? error.name : typeof error,
+            phase: "detect",
+            targetLanguage: state.targetLanguage,
           });
 
           popoverController.showError(normalizedError);
@@ -853,7 +870,7 @@ export default defineContentScript({
       sourceLanguage: string;
       abortController: AbortController;
     }): void {
-      console.log("[Instant Translator] 開始翻譯", {
+      debugLog("[Instant Translator] 開始翻譯", {
         requestId: input.requestId,
         sourceLanguage: input.sourceLanguage,
         targetLanguage: state.targetLanguage,
@@ -908,7 +925,7 @@ export default defineContentScript({
           state.detectedSourceLanguage = result.sourceLanguage;
           popoverController.showSuccess(result.translatedText);
 
-          console.log("[Instant Translator] 翻譯完成", {
+          debugLog("[Instant Translator] 翻譯完成", {
             requestId: input.requestId,
             sourceLanguage: result.sourceLanguage,
             targetLanguage: result.targetLanguage,
@@ -918,7 +935,7 @@ export default defineContentScript({
           const normalizedError = normalizeTranslationError(error, "translate");
 
           if (isAbortError(normalizedError)) {
-            console.debug("[Instant Translator] 翻譯已取消", {
+            debugLog("[Instant Translator] 翻譯已取消", {
               requestId: input.requestId,
             });
             return;
@@ -928,12 +945,11 @@ export default defineContentScript({
             return;
           }
 
-          console.error("[Instant Translator] 翻譯失敗", {
+          logTranslationError("翻譯失敗", error, {
             requestId: input.requestId,
-            code: normalizedError.code,
+            phase: "translate",
             sourceLanguage: input.sourceLanguage,
             targetLanguage: state.targetLanguage,
-            errorName: error instanceof Error ? error.name : typeof error,
           });
 
           popoverController.showError(normalizedError);
@@ -953,14 +969,14 @@ export default defineContentScript({
 
       void saveTranslatorSettings(settings)
         .then(() => {
-          console.log("[Instant Translator] 設定已保存", settings);
+          debugLog("[Instant Translator] 設定已保存", settings);
         })
         .catch((error: unknown) => {
           /*
            * 保存設定失敗不應破壞
            * 目前正在進行的翻譯。
            */
-          console.error("[Instant Translator] 保存設定失敗", {
+          errorLog("[Instant Translator] 保存設定失敗", {
             settings,
             error,
           });
@@ -1055,7 +1071,7 @@ export default defineContentScript({
         hidePopover();
       }
 
-      console.log("[Instant Translator] 已同步其他分頁的設定", {
+      debugLog("[Instant Translator] 已同步其他分頁的設定", {
         enabled: settings.enabled,
 
         sourceLanguageSetting: settings.sourceLanguageSetting,
@@ -1203,6 +1219,8 @@ export default defineContentScript({
     ctx.onInvalidated(() => {
       latestRequestId = null;
 
+      document.documentElement.removeAttribute(CONTENT_SCRIPT_MARKER);
+
       if (selectionProcessFrame !== null) {
         cancelAnimationFrame(selectionProcessFrame);
         selectionProcessFrame = null;
@@ -1211,7 +1229,7 @@ export default defineContentScript({
       abortActiveTranslation();
 
       void destroyLanguageDetector().catch((error: unknown) => {
-        console.debug("[Instant Translator] 清除 Language Detector 失敗", error);
+        debugLog("[Instant Translator] 清除 Language Detector 失敗", error);
       });
 
       translationUi?.remove();
@@ -1229,12 +1247,12 @@ export default defineContentScript({
         delete globalScope[GLOBAL_INSTANCE_KEY];
       }
       void destroyAllTranslatorSessions().catch((error: unknown) => {
-        console.debug("[Instant Translator] 清除 Translator session 失敗", error);
+        debugLog("[Instant Translator] 清除 Translator session 失敗", error);
       });
       void stopSpeechInBackground().catch(() => {
         // 擴充功能失效時不再處理錯誤。
       });
-      console.log("[Instant Translator] Content Script 已清理", {
+      debugLog("[Instant Translator] Content Script 已清理", {
         instanceId,
       });
     });

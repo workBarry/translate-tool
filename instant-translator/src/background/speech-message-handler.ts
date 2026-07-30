@@ -1,4 +1,9 @@
 import {
+  debugLog,
+  errorLog,
+} from "../shared/logger";
+
+import {
   browser,
   type Browser,
 } from 'wxt/browser';
@@ -62,7 +67,7 @@ export function registerSpeechMessageHandler():
             sendResponse(response);
           })
           .catch((error: unknown) => {
-            console.error(
+            errorLog(
               '[Instant Translator Background] 未預期的發音錯誤',
               error,
             );
@@ -213,7 +218,7 @@ async function handleSpeakText(
       enqueue: false,
 
 onEvent(event) {
-  console.log(
+  debugLog(
     '[Instant Translator Background] TTS 事件',
     {
       requestId,
@@ -275,7 +280,7 @@ onEvent(event) {
       options,
     );
 
-    console.log(
+    debugLog(
       '[Instant Translator Background] 已開始發音',
       {
         requestId,
@@ -292,7 +297,7 @@ onEvent(event) {
       requestId,
     };
   } catch (error: unknown) {
-    console.error(
+    errorLog(
       '[Instant Translator Background] 發音失敗',
       {
         requestId,
@@ -342,7 +347,7 @@ function handleStopSpeech(
   try {
     browser.tts.stop();
 
-    console.log(
+    debugLog(
       '[Instant Translator Background] 已停止發音',
       {
         requestId,
@@ -354,7 +359,7 @@ function handleStopSpeech(
       requestId,
     };
   } catch (error: unknown) {
-    console.error(
+    errorLog(
       '[Instant Translator Background] 停止發音失敗',
       {
         requestId,
@@ -441,7 +446,7 @@ async function sendPlaybackEvent(
      * 使用者可能已關閉分頁，
      * 或 Content Script 已失效。
      */
-    console.debug(
+    debugLog(
       '[Instant Translator Background] 無法傳送 TTS 狀態',
       {
         tabId,

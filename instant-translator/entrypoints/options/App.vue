@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import {
+  errorLog,
+} from "../../src/shared/logger";
+
+
+import {
   ref,
 } from 'vue';
 
@@ -164,7 +169,7 @@ async function prepareCommonLanguages():
     status.value =
       'completed';
   } catch (error: unknown) {
-    console.error(
+    errorLog(
       '[Instant Translator] 常用語言準備失敗',
       error,
     );
